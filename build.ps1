@@ -1,7 +1,7 @@
-param([switch]$Publish, [string]$Version = '0.1.0')
+param([switch]$Publish, [string]$Version = '0.1.1')
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
-if ($Version -notmatch '^0\.[0-9]+\.[0-9]+$') { throw 'Expected a pre-1.0 semantic version, e.g. 0.1.0' }
+if ($Version -notmatch '^0\.[0-9]+\.[0-9]+$') { throw 'Expected a pre-1.0 semantic version, e.g. 0.1.1' }
 $taskDotnet = if (Test-Path './work/dotnet/dotnet.exe') { Join-Path $PSScriptRoot 'work/dotnet/dotnet.exe' } else { 'dotnet' }
 $taskPython = if (Test-Path './work/venv/Scripts/python.exe') { Join-Path $PSScriptRoot 'work/venv/Scripts/python.exe' } else { 'python' }
 & $taskDotnet build -c Release

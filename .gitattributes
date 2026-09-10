@@ -10,3 +10,5 @@
 *.png binary
 *.exe binary
 *.zip binary
+# Reference snapshot bytes are hashed by the embedding model.
+data/official-references.json -text whitespace=cr-at-eol

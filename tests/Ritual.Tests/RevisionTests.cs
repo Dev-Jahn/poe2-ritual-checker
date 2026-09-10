@@ -6,6 +6,21 @@ namespace Ritual.Tests;
 public class RevisionTests
 {
     [Fact]
+    public void EmbeddingLoadsAgainstPublishedReferenceSnapshot()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "RitualChecker.sln")))
+            root = root.Parent;
+        Assert.NotNull(root);
+        using var vision = new VisionEngine(
+            Path.Combine(root!.FullName, "data"),
+            "hybrid",
+            useUserExamples: false
+        );
+        Assert.NotEmpty(vision.Catalog.Items);
+    }
+
+    [Fact]
     public void OfficialCurrentArtRecognizesOmenCropsOnSyntheticGrid()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
