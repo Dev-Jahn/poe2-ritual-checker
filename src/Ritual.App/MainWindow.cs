@@ -140,7 +140,7 @@ public sealed class MainWindow : Window
         }
         cache = new(Path.Combine(data, "price-cache"));
         ocr.LoadDigitReference(Path.Combine(data, "ui", "quantity-one.png"));
-        Title = "Ritual Checker · Controller Edition";
+        Title = "Ritual Checker";
         Width = 1280;
         Height = 850;
         MinWidth = 980;
@@ -1070,7 +1070,7 @@ public sealed class MainWindow : Window
                         fullFrame = true,
                         resolution = new[] { copy.Width, copy.Height },
                         hdr,
-                        ui = "controller-ko",
+                        ui = "ko",
                         captureBackend = "Windows.Graphics.Capture/game-window",
                         sha256 = hash,
                         prediction = result,

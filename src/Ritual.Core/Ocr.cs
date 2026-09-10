@@ -324,7 +324,10 @@ public sealed class TextReaderEngine
             else
                 kept.Add(line.Text);
         }
-        var cost = result.Lines.FirstOrDefault(l => TooltipParser.Key(l.Text) == "비용");
+        var cost = result.Lines.LastOrDefault(l =>
+            TooltipParser.Key(l.Text).StartsWith("비용")
+            && !blueLines.Any(b => Math.Abs(b.Top - l.Words.Min(w => w.BoundingRect.Y) / scale) < 3)
+        );
         if (cost is not null && analysis.Grid is { } grid)
         {
             int top = Math.Clamp(
@@ -491,28 +494,23 @@ public static class TooltipParser
         {
             if (!Key(lines[i]).Contains("공물점수"))
                 continue;
-            var costLine = Regex.Replace(
-                lines[i],
-                @"[x×X]\s*([0-9lIO,]+)",
-                m => "x" + m.Groups[1].Value.Replace('l', '1').Replace('I', '1').Replace('O', '0')
-            );
-            var nums = Values(costLine);
-            if (nums.Length == 0 && i + 1 < lines.Length)
-                nums = Values(lines[i + 1]);
-            if (
-                nums.Length != 1
-                || nums[0] <= 0
-                || nums[0] > int.MaxValue
-                || nums[0] != Math.Truncate(nums[0])
-            )
+            var compact = Regex.Replace(lines[i], @"\s", "");
+            int start = compact.IndexOf("공물점수", StringComparison.Ordinal);
+            if (start < 0)
+                continue;
+            var amount = compact[(start + "공물점수".Length)..].TrimStart('x', 'X', '×', 'ⅹ', ':');
+            if (amount.Length == 0 && i + 1 < lines.Length)
+                amount = Regex.Replace(lines[i + 1], @"\s", "").TrimStart('x', 'X', '×', 'ⅹ');
+            var value = TributeAmount(amount);
+            if (value is null)
                 continue;
             bool isDefer =
                 deferMode
                 || string.Join(' ', lines.Skip(Math.Max(0, i - 2)).Take(3)).Contains("보류");
             if (isDefer)
-                defer = (int)nums[0];
+                defer = value;
             else
-                purchase = (int)nums[0];
+                purchase = value;
         }
         return new(
             item.Id,
@@ -525,6 +523,17 @@ public static class TooltipParser
             complete,
             raw
         );
+    }
+
+    internal static int? TributeAmount(string text)
+    {
+        // Read the whole numeric field: a misread leading 8 must not turn B61 into 61.
+        if (!Regex.IsMatch(text, @"^[0-9lIOB,]+$"))
+            return null;
+        var digits = text.Replace('l', '1').Replace('I', '1').Replace('O', '0').Replace('B', '8');
+        if (!Regex.IsMatch(digits, @"^\d+(?:,\d{3})*$"))
+            return null;
+        return int.TryParse(digits.Replace(",", ""), out int value) && value > 0 ? value : null;
     }
 
     public static string[] FormatOptions(TooltipInfo info, CatalogItem item)

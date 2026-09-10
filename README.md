@@ -1,25 +1,25 @@
 # PoE2 Ritual Checker
 
-한국어 **컨트롤러 UI**의 의식 보상을 인식하고 아이템별 묶음 시세를 표시하는 Windows 앱입니다. CPU 기반 로컬 영상 인식과 Windows OCR을 사용합니다.
+한국어 의식 보상을 인식하고 아이템별 묶음 시세를 표시하는 Windows 앱입니다. CPU 기반 로컬 영상 인식과 Windows OCR을 사용하며, 컨트롤러와 키보드/마우스 UI의 개발 캡처로 검증합니다.
 
-**현재 버전: 0.2.4 — 개발 프리릴리스.** 제공된 개발 캡처의 회귀 검사는 통과했으나 전체 아이템·HDR·모든 화면 환경의 정확도가 입증된 제품은 아닙니다.
+**현재 버전: 0.3.0 — 개발 프리릴리스.** 제공된 개발 캡처의 회귀 검사는 통과했으나 전체 아이템·HDR·모든 화면 환경의 정확도가 입증된 제품은 아닙니다.
 
 ## 다운로드 및 실행
 
-[GitHub Releases](https://github.com/Dev-Jahn/poe2-ritual-checker/releases)에서 `RitualChecker-0.2.4-win-x64.exe` 하나를 내려받아 쓰기 가능한 폴더에서 실행하세요. DLL 폴더나 별도 .NET 설치는 필요 없습니다.
+[GitHub Releases](https://github.com/Dev-Jahn/poe2-ritual-checker/releases)에서 `RitualChecker-0.3.0-win-x64.exe` 하나를 내려받아 쓰기 가능한 폴더에서 실행하세요. DLL 폴더나 별도 .NET 설치는 필요 없습니다.
 
 - Windows 10 2004 이상 또는 Windows 11, x64.
 - 한국어 툴팁 판독에는 Windows 한국어 OCR 언어 기능이 필요합니다.
-- XInput 호환 컨트롤러 기준입니다. 리그를 선택한 뒤 의식 창에서 **F8** 또는 **LB+RB를 길게 누르기**로 분석합니다.
-- 아이템 위에 아날로그 커서를 올리면 옵션과 공물 비용을 읽습니다. 키와 버튼 조합은 입력 설정에서 변경합니다.
+- 리그를 선택한 뒤 의식 창에서 **F8**로 분석합니다. XInput 호환 컨트롤러에서는 **LB+RB를 길게 눌러도** 됩니다.
+- 아이템 위에 커서를 올려 툴팁을 표시하면 옵션과 공물 비용을 읽습니다. 마우스 툴팁 검증은 현재 위쪽에 표시된 커런시 툴팁 1장입니다. 키와 버튼 조합은 입력 설정에서 변경합니다.
 - 저장된 화면은 **화면 파일 열기**로 확인합니다. 미리보기는 의식 창을 확대합니다.
 
 실행 파일은 현재 Authenticode 서명되지 않았습니다. 게시된 SHA-256과 빌드 출처 증명을 확인할 수 있으며, 이는 Windows 코드 서명을 대체하지 않습니다.
 
 ```powershell
-Get-FileHash ./RitualChecker-0.2.4-win-x64.exe -Algorithm SHA256
+Get-FileHash ./RitualChecker-0.3.0-win-x64.exe -Algorithm SHA256
 # GitHub CLI가 설치되어 있으면 빌드 출처 확인:
-gh attestation verify ./RitualChecker-0.2.4-win-x64.exe --repo Dev-Jahn/poe2-ritual-checker
+gh attestation verify ./RitualChecker-0.3.0-win-x64.exe --repo Dev-Jahn/poe2-ritual-checker
 ```
 
 ## 기능
@@ -59,17 +59,17 @@ Windows, .NET 8 SDK, Python 3.13을 준비합니다. 공개 저장소에 고정�
 python -m pip install -r tools/requirements.txt
 ./build.ps1
 python -m pytest tests/test_tools.py -q
-./build.ps1 -Publish -Version 0.2.4
+./build.ps1 -Publish -Version 0.3.0
 ```
 
-결과: `artifacts/0.2.4/RitualChecker-0.2.4-win-x64.exe`와 `SHA256SUMS.txt`.
+결과: `artifacts/0.3.0/RitualChecker-0.3.0-win-x64.exe`와 `SHA256SUMS.txt`.
 WPF 호환성을 위해 trimming은 사용하지 않습니다. 게시 단계는 단일 EXE 외 파일이 생기면 실패합니다.
 
 참조 갱신은 `python tools/update_catalog.py --out data`로 수행합니다. 원격 이미지·옵션 변경은 인식 결과에 영향을 주므로 변경 자료는 다시 검증해야 합니다. 게임 이미지와 정보의 권리는 [별도 출처 안내](THIRD_PARTY_NOTICES.md)를 확인하세요.
 
 ## 검증과 한계
 
-개발 캡처 39장(서로 다른 이미지 38장)의 회귀 검사를 통과했습니다. 38장에서는 아이템 관측 526건·툴팁 화면 7장을 검사하고, 보류 실패 화면 1장은 창 검출·격자 위치·보류 모드를 검사합니다. 같은 화면의 반복 관측과 개발에 사용한 자료를 포함합니다. 독립 최종 시험이나 99.9999% 정확도 입증이 아닙니다.
+개발 캡처 46장(서로 다른 이미지 45장)의 회귀 검사를 통과했습니다. 45장에서는 아이템 관측 641건·툴팁 화면 8장을 검사하고, 보류 실패 화면 1장은 창 검출·격자 위치·보류 모드를 검사합니다. 키보드/마우스 자료는 한 사용자의 2560×1440 화면 7장·아이템 관측 115건입니다. 같은 화면의 반복 관측과 개발에 사용한 자료를 포함합니다. 독립 최종 시험이나 99.9999% 정확도 입증이 아닙니다.
 
 원본 캡처와 정답 목록은 개인정보 때문에 공개하지 않습니다. 따라서 공개 CI의 단위 검사가 전체 캡처 회귀 검사를 재현하지는 않습니다. 평가 형식과 도구는 공개합니다. [검증 범위](docs/VALIDATION.md), [릴리스 절차](docs/RELEASING.md), [공개 전 점검](docs/PUBLICATION_REVIEW.md)을 참고하세요.
 

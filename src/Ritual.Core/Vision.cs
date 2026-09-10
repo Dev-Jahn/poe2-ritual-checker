@@ -593,6 +593,30 @@ public sealed class VisionEngine : IDisposable
         return reference.Manual && score < .70 ? -1 : score;
     }
 
+    private static IEnumerable<(Point p, double s)[]> ConnectedCells(
+        (Point p, double s)[] peaks,
+        int cell
+    )
+    {
+        var remaining = peaks.ToList();
+        while (remaining.Count > 0)
+        {
+            var group = new List<(Point p, double s)> { remaining[0] };
+            remaining.RemoveAt(0);
+            for (int index = 0; index < group.Count; index++)
+            for (int i = remaining.Count - 1; i >= 0; i--)
+                if (
+                    Math.Abs(remaining[i].p.X - group[index].p.X) < cell * 1.5
+                    && Math.Abs(remaining[i].p.Y - group[index].p.Y) < cell * 1.5
+                )
+                {
+                    group.Add(remaining[i]);
+                    remaining.RemoveAt(i);
+                }
+            yield return group.ToArray();
+        }
+    }
+
     public GridObservation? DetectGrid(Mat bgr)
     {
         if (bgr.Width > bgr.Height * 2.5)
@@ -659,58 +683,86 @@ public sealed class VisionEngine : IDisposable
             }
             if (peaks.Count < 8)
                 return;
-            var anchor = peaks[0].p;
-            var aligned = peaks
-                .Where(p =>
-                    Math.Abs(
-                        (p.p.X - anchor.X) / (double)cell
-                            - Math.Round((p.p.X - anchor.X) / (double)cell)
-                    ) < .12
-                    && Math.Abs(
-                        (p.p.Y - anchor.Y) / (double)cell
-                            - Math.Round((p.p.Y - anchor.Y) / (double)cell)
-                    ) < .12
+            // Inventory can have the sharpest cell. Check each lattice phase before choosing a grid.
+            var remaining = peaks.ToList();
+            while (remaining.Count >= 8)
+            {
+                var anchor = remaining[0].p;
+                var aligned = remaining
+                    .Where(p =>
+                        Math.Abs(
+                            (p.p.X - anchor.X) / (double)cell
+                                - Math.Round((p.p.X - anchor.X) / (double)cell)
+                        ) < .12
+                        && Math.Abs(
+                            (p.p.Y - anchor.Y) / (double)cell
+                                - Math.Round((p.p.Y - anchor.Y) / (double)cell)
+                        ) < .12
+                    )
+                    .ToArray();
+                remaining.RemoveAll(p => aligned.Contains(p));
+                if (aligned.Length < 8)
+                    continue;
+                // A tooltip can split one grid's visible cells. Prefer the combined evidence;
+                // disconnected components also handle separate windows with the same lattice phase.
+                foreach (
+                    var component in new[] { aligned }.Concat(
+                        ConnectedCells(aligned, cell).Where(g => g.Length < aligned.Length)
+                    )
                 )
-                .ToArray();
-            if (aligned.Length < 8)
-                return;
-            int right = aligned.Max(p => p.p.X),
-                top = aligned.Min(p => p.p.Y);
-            var xs = aligned
-                .Select(p => (i: 11 - Math.Round((right - p.p.X) / (double)cell), v: (double)p.p.X))
-                .ToArray();
-            var ys = aligned
-                .Select(p => (i: Math.Round((p.p.Y - top) / (double)cell), v: (double)p.p.Y))
-                .ToArray();
-            double Slope((double i, double v)[] a)
-            {
-                var mi = a.Average(z => z.i);
-                var mv = a.Average(z => z.v);
-                var denominator = a.Sum(z => (z.i - mi) * (z.i - mi));
-                return denominator > 0 ? a.Sum(z => (z.i - mi) * (z.v - mv)) / denominator : cell;
-            }
-            var spacing = (Slope(xs) + Slope(ys)) / 2;
-            var x0 = xs.Average(z => z.v - z.i * spacing) - cell * 6.0 / 70;
-            var y0 = ys.Average(z => z.v - z.i * spacing) - cell * 4.0 / 70;
-            var box = new Box(
-                (int)Math.Round(x0 / factor),
-                (int)Math.Round(y0 / factor),
-                (int)Math.Round(spacing * 12 / factor),
-                (int)Math.Round(spacing * 10 / factor)
-            );
-            if (!Within(box, bgr))
-                return;
-            double quality = aligned.Length * aligned.Average(p => p.s);
-            if (quality > bestQuality)
-            {
-                bestQuality = quality;
-                bestCell = cell;
-                best = new(box, spacing / factor, aligned.Average(p => p.s));
+                {
+                    if (component.Length < 8)
+                        continue;
+                    int right = component.Max(p => p.p.X),
+                        top = component.Min(p => p.p.Y);
+                    var xs = component
+                        .Select(p =>
+                            (i: 11 - Math.Round((right - p.p.X) / (double)cell), v: (double)p.p.X)
+                        )
+                        .ToArray();
+                    var ys = component
+                        .Select(p =>
+                            (i: Math.Round((p.p.Y - top) / (double)cell), v: (double)p.p.Y)
+                        )
+                        .ToArray();
+                    double Slope((double i, double v)[] a)
+                    {
+                        var mi = a.Average(z => z.i);
+                        var mv = a.Average(z => z.v);
+                        var denominator = a.Sum(z => (z.i - mi) * (z.i - mi));
+                        return denominator > 0
+                            ? a.Sum(z => (z.i - mi) * (z.v - mv)) / denominator
+                            : cell;
+                    }
+                    var spacing = (Slope(xs) + Slope(ys)) / 2;
+                    var x0 = xs.Average(z => z.v - z.i * spacing) - cell * 6.0 / 70;
+                    var y0 = ys.Average(z => z.v - z.i * spacing) - cell * 4.0 / 70;
+                    var box = new Box(
+                        (int)Math.Round(x0 / factor),
+                        (int)Math.Round(y0 / factor),
+                        (int)Math.Round(spacing * 12 / factor),
+                        (int)Math.Round(spacing * 10 / factor)
+                    );
+                    if (!Within(box, bgr))
+                        continue;
+                    double quality = component.Length * component.Average(p => p.s);
+                    var candidate = new GridObservation(
+                        box,
+                        spacing / factor,
+                        component.Average(p => p.s)
+                    );
+                    if (quality > bestQuality && VerifyRitualWindow(bgr, candidate))
+                    {
+                        bestQuality = quality;
+                        bestCell = cell;
+                        best = candidate;
+                    }
+                }
             }
         }
         int max = Math.Min(116, Math.Min(gray.Width / 12, gray.Height / 10));
         TryScale((int)Math.Round(70 * factor));
-        if (bestQuality >= 40 && best is not null && VerifyRitualWindow(bgr, best))
+        if (bestQuality >= 40 && best is not null)
             return best;
         if (bestQuality < 20)
             for (int cell = 16; cell <= max; cell += 2)
@@ -718,7 +770,7 @@ public sealed class VisionEngine : IDisposable
         int coarse = bestCell;
         for (int cell = Math.Max(16, coarse - 3); cell <= Math.Min(max, coarse + 3); cell++)
             TryScale(cell);
-        return best is not null && VerifyRitualWindow(bgr, best) ? best : null;
+        return best;
     }
 
     private static double MatchUi(
@@ -981,6 +1033,8 @@ public sealed class VisionEngine : IDisposable
 
     public static bool Selected(Mat image, Box box, double cell)
     {
+        if (MouseHovered(image, box, cell))
+            return true;
         // The selected slot has an upward chevron. A deferred item's flat gold
         // border is not selection and must not attach another item's tooltip.
         int cx = box.X + box.Width / 2;
@@ -997,6 +1051,35 @@ public sealed class VisionEngine : IDisposable
             && Bright(4, -5)
             && !Bright(-9, -8)
             && !Bright(9, -8);
+    }
+
+    internal static bool MouseHovered(Mat image, Box box, double cell)
+    {
+        if (!Within(box, image))
+            return false;
+        bool Green(int x, int y)
+        {
+            var p = image.At<Vec3b>(y, x);
+            return p.Item1 >= 20 && p.Item1 > p.Item0 * 1.3 && p.Item1 > p.Item2 * 1.3;
+        }
+        int margin = Math.Max(3, (int)(cell * .08));
+        bool Edge(bool horizontal)
+        {
+            int length = (horizontal ? box.Width : box.Height) - 2 * margin;
+            if (length < 8)
+                return false;
+            for (int offset = 0; offset <= 1; offset++)
+            {
+                int green = 0;
+                for (int i = margin; i < margin + length; i++)
+                    if (Green(box.X + (horizontal ? i : offset), box.Y + (horizontal ? offset : i)))
+                        green++;
+                if (green > length * .7)
+                    return true;
+            }
+            return false;
+        }
+        return Edge(true) && Edge(false);
     }
 
     private bool Deferred(Mat crop, double cell)
@@ -1120,7 +1203,7 @@ public sealed class VisionEngine : IDisposable
             .OrderByDescending(r => r.Width)
             .ToArray();
         if (heads.Length == 0)
-            return null;
+            return DetectMouseTooltipAboveItem(bgr, grid);
         var head = heads[0];
         int left = Math.Max(0, head.X - 8),
             top = Math.Max(0, head.Y - 8);
@@ -1136,6 +1219,63 @@ public sealed class VisionEngine : IDisposable
                 grid.CellSize
             )
         );
+    }
+
+    private static Box? DetectMouseTooltipAboveItem(Mat image, GridObservation grid)
+    {
+        var hovered = new List<Box>();
+        for (int y = 0; y < 10; y++)
+        for (int x = 0; x < 12; x++)
+        {
+            var box = CellBox(grid, x, y, 1, 1);
+            if (MouseHovered(image, box, grid.CellSize))
+                hovered.Add(box);
+        }
+        if (hovered.Count != 1 || hovered[0].Y < grid.CellSize)
+            return null;
+        var item = hovered[0];
+        int left = Math.Max(0, item.X - (int)(grid.CellSize * 12));
+        int right = Math.Min(image.Width, item.Right + (int)(grid.CellSize * 12));
+        using var region = new Mat(image, new Rect(left, 0, right - left, item.Y));
+        using var gray = new Mat();
+        Cv2.CvtColor(region, gray, ColorConversionCodes.BGR2GRAY);
+        using var edges = new Mat();
+        Cv2.Canny(gray, edges, 35, 90);
+        Cv2.FindContours(
+            edges,
+            out Point[][] contours,
+            out _,
+            RetrievalModes.List,
+            ContourApproximationModes.ApproxSimple
+        );
+        var headers = contours
+            .Where(contour =>
+            {
+                var r = Cv2.BoundingRect(contour);
+                return r.Width >= grid.CellSize * 4
+                    && r.Height >= grid.CellSize * .25
+                    && r.Height <= grid.CellSize * 1.8
+                    && r.Width > r.Height * 4
+                    && Math.Abs(Cv2.ContourArea(contour)) > r.Width * r.Height * .8
+                    && r.X + left < item.Right
+                    && r.Right + left > item.X
+                    && item.Y - r.Bottom >= grid.CellSize;
+            })
+            .Select(Cv2.BoundingRect)
+            .OrderByDescending(r => r.Width);
+        foreach (var header in headers)
+        {
+            using var area = new Mat(gray, header);
+            using var dark = new Mat();
+            Cv2.InRange(area, Scalar.All(0), Scalar.All(55), dark);
+            if (Cv2.CountNonZero(dark) < header.Width * header.Height * .75)
+                continue;
+            int x = Math.Max(0, left + header.X - (int)(grid.CellSize * .4));
+            int y = Math.Max(0, header.Y - 4);
+            int end = Math.Min(image.Width, left + header.Right + (int)(grid.CellSize * .15));
+            return new(x, y, end - x, item.Y - y);
+        }
+        return null;
     }
 
     private static int TooltipHeight(Mat image, int x, int y, int width, double cell)
