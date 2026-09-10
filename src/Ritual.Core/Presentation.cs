@@ -20,10 +20,10 @@ public static class Presentation
         );
     }
 
-    // A missing exchange rate never creates a fictional value tier.
-    public static double? ValuePosition(decimal? exalted, decimal? rate, bool estimated)
+    // Confidence uses text markers; the same value must keep its color across UI states.
+    public static double? ValuePosition(decimal? exalted, decimal? rate)
     {
-        if (estimated || exalted is null || rate is null or <= 0)
+        if (exalted is null || rate is null or <= 0)
             return null;
         return Math.Clamp((Math.Log10(Math.Max(.001, (double)(exalted / rate))) + 2) / 3, 0, 1);
     }

@@ -27,11 +27,7 @@ public sealed class LabelsLayer : FrameworkElement
 
     private static Brush ValueBrush(PriceLabel label)
     {
-        var position = Presentation.ValuePosition(
-            label.Exalted,
-            label.ExaltedPerDivine,
-            label.Item.Estimated
-        );
+        var position = Presentation.ValuePosition(label.Exalted, label.ExaltedPerDivine);
         if (position is null)
             return Brushes.LightSlateGray;
         var stops = new[]

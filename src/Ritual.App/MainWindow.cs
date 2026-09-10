@@ -1475,7 +1475,7 @@ public sealed class MainWindow : Window
                         : item.Quantity is null ? "?개"
                         : price,
                     detail,
-                    quote?.Estimated == true ? null : formatted?.TotalExalted,
+                    formatted?.TotalExalted,
                     exchangeRate?.ExaltedPerDivine
                 )
             );

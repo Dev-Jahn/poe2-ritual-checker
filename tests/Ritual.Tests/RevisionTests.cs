@@ -123,12 +123,42 @@ public class RevisionTests
     }
 
     [Fact]
-    public void UncertainPricesDoNotGetExpensiveHighlight()
+    public void ValueColorsRequirePriceAndExchangeRate()
     {
-        Assert.Null(Presentation.ValuePosition(1000, null, false));
-        Assert.Null(Presentation.ValuePosition(1000, 100, true));
-        Assert.True(
-            Presentation.ValuePosition(1000, 100, false) > Presentation.ValuePosition(1, 100, false)
+        Assert.Null(Presentation.ValuePosition(1000, null));
+        Assert.Null(Presentation.ValuePosition(null, 100));
+        Assert.Null(Presentation.ValuePosition(1000, 0));
+        Assert.True(Presentation.ValuePosition(1000, 100) > Presentation.ValuePosition(1, 100));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void PriceMarkersDoNotChangeValueColor(bool estimated, bool stale)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var rate = new Rate(250, now);
+        var quote = new PriceQuote(
+            "item",
+            "league",
+            12.5m,
+            "exalted",
+            now,
+            "poe.ninja",
+            "representative",
+            10,
+            Stale: stale,
+            Estimated: estimated,
+            ExchangeRate: rate
+        );
+        var formatted = Valuation.Format(quote, 1, rate);
+        Assert.Equal(estimated, formatted.Text.StartsWith("≈ "));
+        Assert.Equal(stale, formatted.Text.EndsWith('*'));
+        Assert.Equal(
+            Presentation.ValuePosition(12.5m, 250),
+            Presentation.ValuePosition(formatted.TotalExalted, rate.ExaltedPerDivine)
         );
     }
 
