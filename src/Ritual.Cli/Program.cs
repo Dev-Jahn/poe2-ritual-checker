@@ -15,6 +15,34 @@ string Option(string name, string fallback)
     return i >= 0 && i + 1 < args.Length ? args[i + 1] : fallback;
 }
 Console.OutputEncoding = System.Text.Encoding.UTF8;
+if (args[0] == "economy-cache")
+{
+    using var ninja = new NinjaMarket(Option("--db", MarketStore.DefaultPath));
+    var league = args[1];
+    await ninja.RefreshAsync(league, default);
+    var catalog = JsonFiles.Read<Catalog>(Path.Combine(Option("--data", "data"), "catalog.json"));
+    var prices = catalog
+        .Items.Select(i => new
+        {
+            i.Id,
+            i.NameEn,
+            Result = ninja.GetQuote(i, league),
+        })
+        .ToArray();
+    Console.WriteLine(
+        JsonSerializer.Serialize(
+            new
+            {
+                summary = ninja.Summary(league),
+                rate = ninja.GetRate(league),
+                priced = prices.Count(x => x.Result.Quote is not null),
+                items = prices,
+            },
+            JsonFiles.Options
+        )
+    );
+    return;
+}
 if (args[0] == "capture")
 {
     var game =

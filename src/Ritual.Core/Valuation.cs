@@ -24,7 +24,11 @@ public static class Valuation
         else
             text =
                 $"{Number(total)} {(quote.Currency == "exalted" ? "ex" : quote.Currency == "divine" ? "div" : quote.Currency)}";
-        return new(text + (quote.Stale ? " · 오래됨" : ""), exalted, quote.Stale);
+        return new(
+            (quote.Estimated ? "≈ " : "") + text + (quote.Stale ? " · 오래됨" : ""),
+            exalted,
+            quote.Stale || quote.Estimated
+        );
     }
 
     private static string Number(decimal n) =>

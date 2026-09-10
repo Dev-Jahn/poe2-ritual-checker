@@ -12,7 +12,8 @@ recognition references; full gameplay captures are not distributed.
 - Catalog names, option dictionaries and reference images: https://poe2db.tw/
 - Current item art: https://web.poecdn.com/ via https://www.pathofexile.com/api/trade2/data/static
 - Per-item source URLs and image mappings: data/catalog.json and data/official-references.json.
-- Currency observations: https://poe2scout.com/
+- Automatic currency and unique observations: https://poe.ninja/ (https://poe.ninja/docs/api).
+- Legacy currency connector, retained for CLI compatibility: https://poe2scout.com/
 - Unique asking prices: https://www.pathofexile.com/trade2 (not completed trades).
 
 ## Software dependencies

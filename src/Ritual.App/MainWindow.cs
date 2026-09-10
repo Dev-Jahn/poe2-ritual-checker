@@ -23,17 +23,26 @@ public sealed class MainWindow : Window
     private readonly Settings settings;
     private VisionEngine? vision;
     private readonly TextReaderEngine ocr = new();
-    private readonly ScoutMarket scout = new();
+    private readonly NinjaMarket ninja;
+    private readonly DispatcherTimer economyTimer = new() { Interval = TimeSpan.FromMinutes(1) };
+    private CancellationTokenSource economyCancellation = new();
+    private readonly CancellationTokenSource lifetimeCancellation = new();
+    private Task? economyRun;
+    private readonly TextBlock economyStatus = new() { Foreground = Brushes.LightSteelBlue };
+    private readonly TextBlock shortcutHint = new()
+    {
+        Foreground = Brushes.LightGray,
+        Margin = new Thickness(0, 4, 0, 14),
+        TextWrapping = TextWrapping.Wrap,
+    };
+    private bool manualTradeBusy;
+    private (string Instance, TooltipInfo Info)? activeTooltip;
     private readonly TradeMarket trade = new();
     private readonly PriceCache cache;
     private InputService? input;
     private WgcCapture? capture;
     private readonly GenerationGate generations = new();
     private readonly SemaphoreSlim operations = new(1);
-    private readonly SemaphoreSlim priceOperations = new(1);
-    private readonly HashSet<string> priceJobs = [];
-    private readonly Dictionary<string, DateTimeOffset> marketCooldowns = [];
-    private readonly HashSet<string> scheduledRetries = [];
     private CancellationTokenSource cancellation = new();
     private readonly Overlay overlay = new();
     private readonly DispatcherTimer watcher;
@@ -101,6 +110,10 @@ public sealed class MainWindow : Window
     public MainWindow(string[] args)
     {
         launchArgs = args;
+        var databaseArg = Array.IndexOf(args, "--economy-db");
+        ninja = new NinjaMarket(
+            databaseArg >= 0 && databaseArg + 1 < args.Length ? args[databaseArg + 1] : null
+        );
         root = BundledAssets.Prepare() ?? FindRoot();
         data = Path.Combine(root, "data");
         settingsPath = Path.Combine(
@@ -116,6 +129,13 @@ public sealed class MainWindow : Window
             when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
         {
             settings = new();
+        }
+        if (launchArgs.Contains("--ui-shot"))
+        {
+            var leagueArg = Array.IndexOf(args, "--league");
+            if (leagueArg >= 0 && leagueArg + 1 < args.Length)
+                settings.League = args[leagueArg + 1];
+            ninja.Load(settings.League);
         }
         cache = new(Path.Combine(data, "price-cache"));
         ocr.LoadDigitReference(Path.Combine(data, "ui", "quantity-one.png"));
@@ -133,11 +153,28 @@ public sealed class MainWindow : Window
             Interval = TimeSpan.FromMilliseconds(settings.WatchIntervalMs),
         };
         watcher.Tick += Watch;
+        economyTimer.Tick += (_, _) =>
+        {
+            if (economyRun?.IsCompleted != false)
+                economyRun = WarmEconomy(settings.League, economyCancellation.Token);
+        };
+        ninja.Updated += league =>
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (!closing && league == settings.League)
+                {
+                    ApplyCachedPrices(generations.Current, cancellation.Token);
+                    economyStatus.Text = ninja.Summary(league);
+                }
+            });
         Loaded += OnLoaded;
         Closing += (_, _) =>
         {
             closing = true;
             watcher.Stop();
+            economyTimer.Stop();
+            economyCancellation.Cancel();
+            lifetimeCancellation.Cancel();
             Invalidate();
             input?.Dispose();
             overlay.Close();
@@ -194,14 +231,8 @@ public sealed class MainWindow : Window
                 Foreground = new SolidColorBrush(Color.FromRgb(230, 194, 119)),
             }
         );
-        header.Children.Add(
-            new TextBlock
-            {
-                Text = "게임에서 F8 또는 LB+RB 길게 누르기 · 원본 화면 자동 수집",
-                Foreground = Brushes.LightGray,
-                Margin = new Thickness(0, 4, 0, 14),
-            }
-        );
+        UpdateShortcutHint();
+        header.Children.Add(shortcutHint);
         var toolbar = new WrapPanel();
         header.Children.Add(toolbar);
         toolbar.Children.Add(
@@ -239,7 +270,7 @@ public sealed class MainWindow : Window
             leagues.ItemsSource = new[] { settings.League };
             leagues.SelectedItem = settings.League;
         }
-        leagues.SelectionChanged += async (_, _) =>
+        leagues.SelectionChanged += (_, _) =>
         {
             if (
                 loadingLeagues
@@ -248,6 +279,7 @@ public sealed class MainWindow : Window
             )
                 return;
             settings.League = league;
+            StartEconomy();
             JsonFiles.Write(settingsPath, settings);
             var active = watching;
             var window = liveWindow;
@@ -264,18 +296,16 @@ public sealed class MainWindow : Window
             Render();
             if (analysis?.Grid is not null)
             {
-                _ = RefreshPrices(generations.Current, null, cancellation.Token);
-                foreach (var tip in tooltips.Values.Distinct())
-                    _ = RefreshPrices(generations.Current, tip, cancellation.Token);
+                ApplyCachedPrices(generations.Current, cancellation.Token);
             }
-            await Task.CompletedTask;
         };
         status.Margin = new Thickness(0, 12, 0, 12);
         header.Children.Add(status);
+        header.Children.Add(economyStatus);
         var footer = new TextBlock
         {
             Text =
-                "관측 오류 0건 검증 미완료 · 가격은 매물 호가/Scout 관측값 · GGG와 무관한 비공식 도구",
+                "관측 오류 0건 검증 미완료 · 가격은 poe.ninja 시세/수동 거래소 호가 · GGG와 무관한 비공식 도구",
             Foreground = Brushes.Gray,
             Margin = new Thickness(0, 12, 0, 0),
         };
@@ -304,10 +334,10 @@ public sealed class MainWindow : Window
             }
         );
         fixPanel.Children.Add(correction);
-        correction.SelectionChanged += async (_, _) =>
+        correction.SelectionChanged += (_, _) =>
         {
             if (!bindingCorrection && correction.SelectedItem is CatalogItem known)
-                await CorrectItem(known);
+                CorrectItem(known);
         };
         correction.KeyUp += (_, e) =>
         {
@@ -410,18 +440,26 @@ public sealed class MainWindow : Window
             if (!launchArgs.Contains("--ui-shot"))
                 try
                 {
-                    input = new(new WindowInteropHelper(this).Handle, settings, () => _ = Live());
+                    input = new(
+                        new WindowInteropHelper(this).Handle,
+                        settings,
+                        () => _ = Live(),
+                        () => _ = ManualTrade()
+                    );
                 }
                 catch (Exception error)
                 {
                     MessageBox.Show(this, error.Message, "입력 설정 확인");
                 }
             SetStatus(
-                $"참조 {vision.Catalog.Items.Length}개 로드 · F8 / LB+RB · "
+                $"참조 {vision.Catalog.Items.Length}개 로드 · "
                     + (ocr.Available ? "한국어 OCR 준비됨" : "한국어 OCR 언어팩 없음")
             );
             if (!launchArgs.Contains("--ui-shot"))
+            {
+                StartEconomy();
                 _ = LoadLeagues();
+            }
             var replay = Array.IndexOf(launchArgs, "--replay");
             if (replay >= 0 && replay + 1 < launchArgs.Length)
                 await Replay(launchArgs[replay + 1]);
@@ -469,6 +507,22 @@ public sealed class MainWindow : Window
         }
     }
 
+    private void UpdateShortcutHint()
+    {
+        string key = System
+            .Windows.Input.KeyInterop.KeyFromVirtualKey(settings.KeyboardVirtualKey)
+            .ToString();
+        string prefix =
+            ((settings.KeyboardModifiers & 2) != 0 ? "Ctrl+" : "")
+            + ((settings.KeyboardModifiers & 1) != 0 ? "Alt+" : "")
+            + ((settings.KeyboardModifiers & 4) != 0 ? "Shift+" : "");
+        string tradeKey = System
+            .Windows.Input.KeyInterop.KeyFromVirtualKey(settings.TradeVirtualKey)
+            .ToString();
+        shortcutHint.Text =
+            $"{prefix}{key}: 분석 · {tradeKey}: 현재 고유 툴팁 거래소 조회 · 컨트롤러 조합은 입력 설정에서 확인";
+    }
+
     private void EditInput()
     {
         var dialog = new Window
@@ -476,7 +530,7 @@ public sealed class MainWindow : Window
             Owner = this,
             Title = "입력 설정",
             Width = 470,
-            Height = 430,
+            Height = 500,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
         };
         var panel = new StackPanel { Margin = new Thickness(20) };
@@ -516,6 +570,16 @@ public sealed class MainWindow : Window
             keyBox.Text = $"{m} + {key}";
         };
         panel.Children.Add(keyBox);
+        panel.Children.Add(
+            new TextBlock { Text = "수동 거래소 조회 키 (컨트롤러: LB+RB+오른쪽 스틱)" }
+        );
+        var tradeKey = new ComboBox
+        {
+            ItemsSource = Enumerable.Range(1, 12).Select(i => "F" + i).ToArray(),
+            SelectedIndex = settings.TradeVirtualKey - 0x70,
+            Margin = new Thickness(0, 6, 0, 10),
+        };
+        panel.Children.Add(tradeKey);
         panel.Children.Add(new TextBlock { Text = "분석할 때 함께 누를 컨트롤러 버튼" });
         var buttonChecks = new List<(CheckBox Check, ushort Value)>();
         var padPanel = new WrapPanel { Margin = new Thickness(0, 8, 0, 10) };
@@ -569,22 +633,26 @@ public sealed class MainWindow : Window
                     var old = (
                         settings.KeyboardVirtualKey,
                         settings.KeyboardModifiers,
-                        settings.ControllerButtons
+                        settings.ControllerButtons,
+                        settings.TradeVirtualKey
                     );
                     try
                     {
                         settings.KeyboardVirtualKey = vk;
                         settings.KeyboardModifiers = modifiers;
                         settings.ControllerButtons = buttons;
+                        settings.TradeVirtualKey = 0x70 + tradeKey.SelectedIndex;
                         if (input is null)
                             input = new(
                                 new WindowInteropHelper(this).Handle,
                                 settings,
-                                () => _ = Live()
+                                () => _ = Live(),
+                                () => _ = ManualTrade()
                             );
                         else
                             input.Configure();
                         JsonFiles.Write(settingsPath, settings);
+                        UpdateShortcutHint();
                         dialog.Close();
                     }
                     catch (Exception ex)
@@ -592,7 +660,8 @@ public sealed class MainWindow : Window
                         (
                             settings.KeyboardVirtualKey,
                             settings.KeyboardModifiers,
-                            settings.ControllerButtons
+                            settings.ControllerButtons,
+                            settings.TradeVirtualKey
                         ) = old;
                         input?.Configure();
                         MessageBox.Show(ex.Message);
@@ -618,6 +687,7 @@ public sealed class MainWindow : Window
         focusRecovery.FrameValidated();
         rate = null;
         lastReadTooltip = null;
+        activeTooltip = null;
         tooltipPixels = null;
         previousTooltip = null;
         tooltipStableFrames = 0;
@@ -687,7 +757,7 @@ public sealed class MainWindow : Window
                 priceStates.Clear();
                 tooltips.Clear();
                 DisplayFrame();
-                Render();
+                ApplyCachedPrices(generation, token);
                 SetStatus(
                     $"{result.Items.Length}개 영역 · 로컬 처리 {watch.Elapsed.TotalMilliseconds:0}ms · {captureStatus ?? "저장 화면"}\n"
                         + string.Join(" / ", result.Warnings)
@@ -696,6 +766,11 @@ public sealed class MainWindow : Window
                 {
                     if (liveWindow != 0)
                         await SaveCapture(captured, result);
+                    capture?.Dispose();
+                    capture = null;
+                    watching = false;
+                    watcher.Stop();
+                    overlay.Hide();
                     return;
                 }
                 if (ocr.Available && result.TooltipBounds is not null)
@@ -727,9 +802,7 @@ public sealed class MainWindow : Window
             }
             if (analysis?.Grid is not null && !string.IsNullOrWhiteSpace(settings.League))
             {
-                _ = RefreshPrices(generation, null, token);
-                foreach (var tip in tooltips.Values.Distinct())
-                    _ = RefreshPrices(generation, tip, token);
+                ApplyCachedPrices(generation, token);
             }
             else if (string.IsNullOrWhiteSpace(settings.League))
                 SetStatus(status.Text + "\n리그를 선택하면 시세를 자동 조회합니다.");
@@ -746,222 +819,191 @@ public sealed class MainWindow : Window
         }
     }
 
-    private async Task RefreshPrices(long generation, TooltipInfo? tooltip, CancellationToken token)
+    private void StartEconomy()
     {
         if (launchArgs.Contains("--ui-shot"))
             return;
-        string job =
-            generation
-            + "|"
-            + (
-                tooltip is null
-                    ? "base"
-                    : PriceCache.Key(settings.League, tooltip.CatalogId ?? "", tooltip)
-            );
-        if (!priceJobs.Add(job))
+        economyCancellation.Cancel();
+        economyCancellation.Dispose();
+        economyCancellation = new();
+        ninja.Load(settings.League);
+        economyTimer.Start();
+        economyRun = WarmEconomy(settings.League, economyCancellation.Token);
+    }
+
+    private async Task WarmEconomy(string league, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(league) || closing)
             return;
+        economyStatus.Text = ninja.Summary(league) + " · 확인 중";
         try
         {
-            await priceOperations.WaitAsync(token);
-            try
-            {
-                if (generations.Accept(generation))
-                    await Prices(generation, tooltip, token);
-            }
-            finally
-            {
-                priceOperations.Release();
-            }
+            await Task.Run(() => ninja.RefreshAsync(league, token), token);
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            if (generations.Accept(generation))
-                SetStatus("시세 갱신: " + ex.Message);
+            return;
         }
-        finally
+        catch (Exception e)
         {
-            priceJobs.Remove(job);
+            if (!closing && settings.League == league)
+                economyStatus.Text = "시세 준비: " + e.Message;
+            return;
+        }
+        if (!closing && settings.League == league)
+        {
+            economyStatus.Text = ninja.Summary(league);
+            ApplyCachedPrices(generations.Current, cancellation.Token);
         }
     }
 
-    private async Task RetryMarket(
-        long generation,
-        string kind,
-        DateTimeOffset due,
-        CancellationToken token
-    )
+    private void ApplyCachedPrices(long generation, CancellationToken token)
     {
-        string key = generation + "|" + kind;
-        if (!scheduledRetries.Add(key))
+        if (
+            !generations.Accept(generation)
+            || token.IsCancellationRequested
+            || analysis is null
+            || vision is null
+        )
             return;
-        try
+        rate = ninja.GetRate(settings.League);
+        foreach (var observed in analysis.Items)
         {
-            while (due > DateTimeOffset.UtcNow)
-            {
-                await Task.Delay(
-                    TimeSpan.FromSeconds(
-                        Math.Max(.01, Math.Min(1, (due - DateTimeOffset.UtcNow).TotalSeconds))
-                    ),
-                    token
-                );
-                if (generations.Accept(generation))
-                    Render();
-            }
-            if (!generations.Accept(generation) || closing)
-                return;
-            marketCooldowns.Remove(kind);
-            scheduledRetries.Remove(key);
-            _ = RefreshPrices(generation, null, token);
-            foreach (var info in tooltips.Values.Distinct())
-                _ = RefreshPrices(generation, info, token);
-        }
-        catch (OperationCanceledException) { }
-        finally
-        {
-            scheduledRetries.Remove(key);
-        }
-    }
-
-    private async Task Prices(long generation, TooltipInfo? tooltip, CancellationToken token)
-    {
-        if (analysis is null || vision is null)
-            return;
-        var targets = analysis
-            .Items.Where(i =>
-                i.CatalogId is not null
-                && (
-                    tooltip is null
-                        ? !tooltips.ContainsKey(i.InstanceId)
-                        : tooltips.TryGetValue(i.InstanceId, out var assigned)
-                            && assigned == tooltip
-                )
-            )
-            .ToArray();
-        foreach (var item in targets)
-        {
-            var old =
-                cache.Read(PriceCache.Key(settings.League, item.CatalogId!, tooltip))
-                ?? (
-                    tooltip is null
-                        ? null
-                        : cache.Read(PriceCache.Key(settings.League, item.CatalogId!))
-                );
-            if (old is not null)
-                quotes[item.InstanceId] = old;
-        }
-        Render();
-        try
-        {
-            var fetchedRate = await scout.RateAsync(settings.League, token);
-            if (!generations.Accept(generation))
-                return;
-            rate = fetchedRate;
-        }
-        catch (Exception e) when (e is not OperationCanceledException)
-        {
-            SetStatus("환율 조회: " + e.Message);
-            rate = null;
-        }
-        foreach (var group in targets.GroupBy(i => i.CatalogId))
-        {
-            token.ThrowIfCancellationRequested();
-            if (!generations.Accept(generation))
-                return;
-            var item = vision.Catalog.Items.Single(i => i.Id == group.Key);
-            var key = PriceCache.Key(settings.League, item.Id, tooltip);
-            var cached = cache.Read(key);
-            if (cached is { Stale: false })
+            var item = vision.Catalog.Items.FirstOrDefault(i => i.Id == observed.CatalogId);
+            if (item is null)
                 continue;
             if (
-                marketCooldowns.TryGetValue(item.Kind, out var until)
-                && until > DateTimeOffset.UtcNow
+                quotes.TryGetValue(observed.InstanceId, out var manual)
+                && manual.Source == "PoE trade2"
+                && DateTimeOffset.UtcNow - manual.RetrievedAt < TimeSpan.FromMinutes(15)
             )
-            {
-                _ = RetryMarket(generation, item.Kind, until, token);
                 continue;
-            }
-            foreach (var observed in group)
-                priceStates[observed.InstanceId] = "조회 중…";
-            Render();
-            try
+            var found = ninja.GetQuote(
+                item,
+                settings.League,
+                tooltips.GetValueOrDefault(observed.InstanceId)
+            );
+            if (found.Quote is not null)
             {
-                PriceQuote? quote;
-                if (item.Kind == "currency")
-                    quote = await scout.QuoteAsync(item, settings.League, token);
-                else
-                {
-                    var result = await trade.QuoteAsync(
-                        item,
-                        settings.League,
-                        rate,
-                        tooltip,
-                        token
-                    );
-                    quote = result.Quote;
-                    JsonFiles.Write(
-                        Path.Combine(
-                            data,
-                            "market-observations",
-                            $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfff}-{item.Id}.json"
-                        ),
-                        new
-                        {
-                            item.Id,
-                            settings.League,
-                            rate,
-                            tooltip,
-                            listings = result.Listings,
-                            quote,
-                        }
-                    );
-                }
-                if (!generations.Accept(generation))
-                    return;
-                if (quote is not null)
-                {
-                    cache.Write(key, quote);
-                    foreach (var observed in group)
-                    {
-                        if (
-                            analysis?.Items.Any(i =>
-                                i.InstanceId == observed.InstanceId && i.CatalogId == quote.ItemId
-                            ) == true
-                            && (tooltip is not null || !tooltips.ContainsKey(observed.InstanceId))
-                        )
-                        {
-                            quotes[observed.InstanceId] = quote;
-                            priceStates.Remove(observed.InstanceId);
-                        }
-                    }
-                }
-                else
-                    foreach (var observed in group)
-                        priceStates[observed.InstanceId] = "매물 없음";
-                Render();
+                quotes[observed.InstanceId] = found.Quote;
+                priceStates.Remove(observed.InstanceId);
             }
-            catch (MarketCooldownException e)
+            else
             {
-                marketCooldowns[item.Kind] = e.RetryAt;
-                if (!generations.Accept(generation))
-                    return;
-                foreach (var observed in group)
-                    priceStates[observed.InstanceId] = "요청 대기";
-                Render();
-                _ = RetryMarket(generation, item.Kind, e.RetryAt, token);
-            }
-            catch (Exception e) when (e is not OperationCanceledException)
-            {
-                if (!generations.Accept(generation))
-                    return;
-                foreach (var observed in group)
-                    priceStates[observed.InstanceId] = "조회 실패";
-                Render();
-                SetStatus($"{VisionEngine.DisplayName(item)}: {e.Message}");
+                quotes.Remove(observed.InstanceId);
+                priceStates[observed.InstanceId] = string.IsNullOrWhiteSpace(settings.League)
+                    ? "리그 선택"
+                    : found.Status;
             }
         }
-        if (generations.Accept(generation))
+        Render();
+    }
+
+    private async Task ManualTrade()
+    {
+        if (
+            manualTradeBusy
+            || !watching
+            || capture is null
+            || vision is null
+            || string.IsNullOrWhiteSpace(settings.League)
+            || GameWindow.GetForegroundWindow() != liveWindow
+        )
+            return;
+        manualTradeBusy = true;
+        bool ownsWatch = false;
+        var token = cancellation.Token;
+        try
+        {
+            for (int i = 0; watchBusy && i < 80; i++)
+                await Task.Delay(25, token);
+            if (
+                watchBusy
+                || !watching
+                || capture is null
+                || GameWindow.GetForegroundWindow() != liveWindow
+            )
+                return;
+            watchBusy = true;
+            ownsWatch = true;
+            using var first = await capture.CaptureAsync(token);
+            var bounds = VisionEngine.DetectTooltip(first.Image, analysis!.Grid!);
+            if (bounds is null)
+            {
+                SetStatus("고유 아이템 툴팁을 띄운 뒤 거래소 단축키를 누르세요.");
+                return;
+            }
+            await Task.Delay(120, token);
+            using var second = await capture.CaptureAsync(token);
+            if (bounds != VisionEngine.DetectTooltip(second.Image, analysis.Grid!))
+            {
+                SetStatus("툴팁이 이동 중입니다. 잠시 후 다시 눌러 주세요.");
+                return;
+            }
+            using var a = new Mat(first.Image, bounds.Rect());
+            using var b = new Mat(second.Image, bounds.Rect());
+            if (Cv2.Norm(a, b, NormTypes.L1) / (a.Total() * a.Channels() * 255) > .012)
+            {
+                SetStatus("툴팁이 변경 중입니다. 잠시 후 다시 눌러 주세요.");
+                return;
+            }
+            await Reanalyze(second.Image, second.ColorStatus);
+            if (activeTooltip is not { } active || analysis?.Grid is null)
+            {
+                SetStatus("현재 툴팁의 아이템을 확인하지 못했습니다.");
+                return;
+            }
+            var item = vision.Catalog.Items.First(i => i.Id == active.Info.CatalogId);
+            if (item.Kind != "unique")
+            {
+                SetStatus("커런시는 미리 저장된 poe.ninja 시세를 사용합니다.");
+                return;
+            }
+            var generation = generations.Current;
+            token = cancellation.Token;
+            string league = settings.League;
+            watchBusy = false;
+            ownsWatch = false;
+            priceStates[active.Instance] = "거래소 조회 중";
+            SetStatus($"{item.NameKo}: 수동 거래소 조회 중 · 대표 시세는 유지합니다.");
+            var key = "manual|" + PriceCache.Key(league, item.Id, active.Info);
+            var quote = cache.Read(key);
+            if (quote is null || quote.Stale)
+            {
+                var result = await trade.QuoteAsync(item, league, rate, active.Info, token);
+                quote = result.Quote;
+                if (quote is not null)
+                    cache.Write(key, quote);
+            }
+            if (!generations.Accept(generation) || league != settings.League)
+                return;
+            if (quote is not null)
+                quotes[active.Instance] = quote;
+            priceStates.Remove(active.Instance);
+            SetStatus(
+                quote is null
+                    ? "비교 매물 없음 · poe.ninja 대표 시세를 유지합니다."
+                    : $"{item.NameKo}: 수동 거래소 호가 갱신 완료"
+            );
             Render();
+        }
+        catch (OperationCanceledException) { }
+        catch (MarketCooldownException e)
+        {
+            SetStatus(
+                $"거래소 요청 제한 · {e.RetryAt.ToLocalTime():HH:mm:ss} 이후 단축키로 다시 요청하세요."
+            );
+        }
+        catch (Exception e)
+        {
+            SetStatus("수동 거래소 조회: " + e.Message);
+        }
+        finally
+        {
+            manualTradeBusy = false;
+            if (ownsWatch)
+                watchBusy = false;
+        }
     }
 
     private async Task LoadLeagues()
@@ -978,7 +1020,7 @@ public sealed class MainWindow : Window
         {
             if (File.Exists(path))
                 Bind(JsonFiles.Read<string[]>(path));
-            var values = await scout.LeaguesAsync(CancellationToken.None);
+            var values = await ninja.LeaguesAsync(lifetimeCancellation.Token);
             if (closing)
                 return;
             Bind(values);
@@ -1069,6 +1111,15 @@ public sealed class MainWindow : Window
                 return;
             }
             var grid = analysis.Grid;
+            if (!vision!.VerifyTitle(current.Image, grid))
+            {
+                Invalidate();
+                analysis = null;
+                labels.Labels = [];
+                labels.InvalidateVisual();
+                SetStatus("의식 창 닫힘 · 분석과 화면 캡처 종료");
+                return;
+            }
             var tooltip = VisionEngine.DetectTooltip(current.Image, grid);
             var changed = VisionEngine.SceneDifference(frame, current.Image, grid);
             if (changed > .025 && tooltip is null)
@@ -1082,6 +1133,7 @@ public sealed class MainWindow : Window
             if (tooltip is null)
             {
                 lastReadTooltip = null;
+                activeTooltip = null;
                 tooltipPixels = null;
                 tooltipStableFrames = 0;
                 return;
@@ -1108,6 +1160,7 @@ public sealed class MainWindow : Window
             {
                 tooltipStableFrames = 0;
                 lastReadTooltip = null;
+                activeTooltip = null;
                 return;
             }
             if (++tooltipStableFrames < 2 || lastReadTooltip is not null)
@@ -1127,15 +1180,15 @@ public sealed class MainWindow : Window
             details.Text =
                 $"{info.Name}\n구매 공물: {info.PurchaseTribute?.ToString() ?? "미확인"}\n{(info.Complete ? "옵션 판독 완료" : "옵션 판독 일부 누락")}\n{TooltipDetails(info)}";
             if (!string.IsNullOrWhiteSpace(settings.League))
-                _ = RefreshPrices(gen, info, token);
+                ApplyCachedPrices(gen, token);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (generations.Accept(gen))
             {
-                overlay.Hide();
-                SetStatus("화면 감시: " + ex.Message);
+                Invalidate();
+                SetStatus("화면 감시 종료: " + ex.Message);
             }
         }
         finally
@@ -1191,14 +1244,20 @@ public sealed class MainWindow : Window
                 )
                 .ToArray(),
         };
-        quotes.Remove(target.InstanceId);
+        if (
+            !tooltips.TryGetValue(target.InstanceId, out var previous)
+            || PriceCache.Key(settings.League, known.Id, previous)
+                != PriceCache.Key(settings.League, known.Id, info)
+        )
+            quotes.Remove(target.InstanceId);
         priceStates.Remove(target.InstanceId);
         tooltips[target.InstanceId] = info;
-        Render();
+        activeTooltip = (target.InstanceId, info);
+        ApplyCachedPrices(generations.Current, cancellation.Token);
         return true;
     }
 
-    private async Task CorrectItem(CatalogItem known)
+    private void CorrectItem(CatalogItem known)
     {
         if (analysis is null || frame is null || vision is null)
             return;
@@ -1240,7 +1299,7 @@ public sealed class MainWindow : Window
         Render();
         SetStatus("이름 수정 저장 · 다음 분석부터 이 실물 참조도 사용합니다.");
         if (!string.IsNullOrWhiteSpace(settings.League))
-            await RefreshPrices(generations.Current, null, cancellation.Token);
+            ApplyCachedPrices(generations.Current, cancellation.Token);
     }
 
     private async Task Reanalyze(Mat current, string colorStatus)
@@ -1254,6 +1313,7 @@ public sealed class MainWindow : Window
         priceStates.Clear();
         tooltips.Clear();
         lastReadTooltip = null;
+        activeTooltip = null;
         tooltipPixels = null;
         await AnalyzeFrame(current.Clone(), colorStatus);
         if (analysis?.Grid is null)
@@ -1261,6 +1321,8 @@ public sealed class MainWindow : Window
             watching = false;
             watcher.Stop();
             overlay.Hide();
+            capture?.Dispose();
+            capture = null;
         }
     }
 
@@ -1316,12 +1378,6 @@ public sealed class MainWindow : Window
                 item.InstanceId,
                 Presentation.PendingPrice(!string.IsNullOrWhiteSpace(settings.League))
             );
-            if (
-                marketCooldowns.TryGetValue(item.Kind, out var cooldown)
-                && cooldown > DateTimeOffset.UtcNow
-            )
-                state =
-                    $"요청 대기 · {Math.Ceiling((cooldown - DateTimeOffset.UtcNow).TotalSeconds)}초";
             if (quote is not null && item.Quantity is null)
                 formatted = new(Valuation.Format(quote, 1, rate).Text + "/개 · 수량?", null, true);
             var price = formatted?.Text ?? state;
@@ -1339,7 +1395,7 @@ public sealed class MainWindow : Window
                 var efficiency = Valuation.Efficiency(
                     formatted?.TotalExalted,
                     info.PurchaseTribute,
-                    !item.Estimated && quote is { Stale: false }
+                    !item.Estimated && quote is { Stale: false, Estimated: false }
                 );
                 detail +=
                     $"\n구매 공물 {info.PurchaseTribute?.ToString() ?? "미확인"} · 공물 1,000점당 {efficiency?.ToString("0.##") ?? "미확인"} ex";
@@ -1371,7 +1427,7 @@ public sealed class MainWindow : Window
                         : item.Quantity is null ? "?개"
                         : price,
                     detail,
-                    formatted?.TotalExalted,
+                    quote?.Estimated == true ? null : formatted?.TotalExalted,
                     rate?.ExaltedPerDivine
                 )
             );

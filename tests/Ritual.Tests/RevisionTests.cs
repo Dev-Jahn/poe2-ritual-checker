@@ -6,6 +6,36 @@ namespace Ritual.Tests;
 public class RevisionTests
 {
     [Fact]
+    public void KnownRitualHeaderDisappearsWhenWindowCloses()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "RitualChecker.sln")))
+            root = root.Parent;
+        Assert.NotNull(root);
+        using var vision = new VisionEngine(Path.Combine(root.FullName, "data"));
+        using var image = new OpenCvSharp.Mat(
+            1000,
+            1100,
+            OpenCvSharp.MatType.CV_8UC3,
+            OpenCvSharp.Scalar.All(0)
+        );
+        using var title = OpenCvSharp.Cv2.ImRead(
+            Path.Combine(root.FullName, "data", "ui", "ritual-title.png")
+        );
+        using (
+            var area = new OpenCvSharp.Mat(
+                image,
+                new OpenCvSharp.Rect(400, 65, title.Width, title.Height)
+            )
+        )
+            title.CopyTo(area);
+        var grid = new GridObservation(new Box(100, 250, 840, 700), 70, 1);
+        Assert.True(vision.VerifyTitle(image, grid));
+        image.SetTo(OpenCvSharp.Scalar.All(0));
+        Assert.False(vision.VerifyTitle(image, grid));
+    }
+
+    [Fact]
     public void EmbeddingLoadsAgainstPublishedReferenceSnapshot()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);

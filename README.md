@@ -2,11 +2,11 @@
 
 한국어 **컨트롤러 UI**의 의식 보상을 인식하고 아이템별 묶음 시세를 표시하는 Windows 앱입니다. CPU 기반 로컬 영상 인식과 Windows OCR을 사용합니다.
 
-**현재 버전: 0.1.1 — 개발 프리릴리스.** 제공된 개발 캡처의 회귀 검사는 통과했으나 전체 아이템·HDR·모든 화면 환경의 정확도가 입증된 제품은 아닙니다.
+**현재 버전: 0.2.0 — 개발 프리릴리스.** 제공된 개발 캡처의 회귀 검사는 통과했으나 전체 아이템·HDR·모든 화면 환경의 정확도가 입증된 제품은 아닙니다.
 
 ## 다운로드 및 실행
 
-[GitHub Releases](https://github.com/Dev-Jahn/poe2-ritual-checker/releases)에서 `RitualChecker-0.1.1-win-x64.exe` 하나를 내려받아 쓰기 가능한 폴더에서 실행하세요. DLL 폴더나 별도 .NET 설치는 필요 없습니다.
+[GitHub Releases](https://github.com/Dev-Jahn/poe2-ritual-checker/releases)에서 `RitualChecker-0.2.0-win-x64.exe` 하나를 내려받아 쓰기 가능한 폴더에서 실행하세요. DLL 폴더나 별도 .NET 설치는 필요 없습니다.
 
 - Windows 10 2004 이상 또는 Windows 11, x64.
 - 한국어 툴팁 판독에는 Windows 한국어 OCR 언어 기능이 필요합니다.
@@ -17,19 +17,22 @@
 실행 파일은 현재 Authenticode 서명되지 않았습니다. 게시된 SHA-256과 빌드 출처 증명을 확인할 수 있으며, 이는 Windows 코드 서명을 대체하지 않습니다.
 
 ```powershell
-Get-FileHash ./RitualChecker-0.1.1-win-x64.exe -Algorithm SHA256
+Get-FileHash ./RitualChecker-0.2.0-win-x64.exe -Algorithm SHA256
 # GitHub CLI가 설치되어 있으면 빌드 출처 확인:
-gh attestation verify ./RitualChecker-0.1.1-win-x64.exe --repo Dev-Jahn/poe2-ritual-checker
+gh attestation verify ./RitualChecker-0.2.0-win-x64.exe --repo Dev-Jahn/poe2-ritual-checker
 ```
 
 ## 기능
 
 - 의식 창과 격자 검출 → 아이템 식별 → 시세 조회 → 입력을 통과시키는 오버레이.
 - 묶음 전체 가격이 1 div 미만이면 ex, 이상이면 div. 환율이 없으면 임의 환산하지 않습니다.
-- 징조 등 커런시는 PoE2Scout 자료를 10분간, 고유 매물은 15분간 재사용합니다.
-- 고유 대표 호가는 온라인 판매자 중복을 제거한 저가 10개 중앙값입니다. 수집할 수 있는 표본이 부족하면 적은 표본으로 계산할 수 있습니다.
-- 옵션 범위가 유사한 저장 매물을 재활용합니다. 충분히 읽힌 극단 옵션은 필요할 때 별도 검색합니다. 비교 표본이 부족하면 대표 호가를 유지합니다.
-- 조회 중·제한 대기·자료 없음·실패를 구분하고, 서버가 지정한 재시도 시간을 지킵니다.
+- 실행 시 선택한 리그의 커런시 14개·고유/서판 9개 분류를 poe.ninja에서 미리 받습니다. 분류당 1회이며 아이템별 요청은 하지 않습니다.
+- 캡처 여부와 관계없이 30분마다 갱신합니다. 재실행해도 유효한 디스크 캐시를 재사용하며, 변경되지 않은 응답은 ETag로 확인합니다. 실패한 갱신은 기존 가격을 지우지 않고 오래됨을 표시합니다.
+- 화면 분석과 자동 툴팁 판독은 로컬 시세만 사용합니다. 최초 설치나 리그 변경 직후에는 초기 자료를 받는 시간이 필요합니다.
+- 같은 고유 이름에 여러 장비 변형이 있으면 매물 표본이 가장 많은 변형의 대표값을 `≈`로 표시합니다. 현재 장비의 변형/옵션이 확인된 가격으로 취급하지 않으며 공물 효율 순위에서 제외합니다.
+- **거래소 자동 검색은 하지 않습니다.** 안정된 고유 툴팁을 띄운 상태에서 **F9** 또는 **LB+RB+오른쪽 스틱 누르기**로 해당 아이템만 조회합니다. 키보드 조회 키는 입력 설정에서 변경할 수 있습니다. 제한에 걸리면 표시된 시간 이후 사용자가 다시 요청합니다.
+- 수동 거래소 조회는 기존 매물 캐시·유사 옵션 비교 기능을 유지합니다. 비교 표본이 부족하면 대표 호가를 표시하며 그 이유를 설명합니다.
+- 의식 창 닫힘을 확인하면 오버레이와 Windows 화면 캡처 세션을 함께 종료합니다. 다음 의식에서는 분석 단축키를 다시 누르세요.
 - 가격 색상, 추정 표시, 수량 미확인 표시, 툴팁의 공물 1,000점당 가치 표시.
 - Alt+Tab 복귀 시 화면을 다시 확인합니다. 이전 화면의 늦은 조회 결과를 새 화면에 적용하지 않습니다.
 
@@ -37,12 +40,12 @@ gh attestation verify ./RitualChecker-0.1.1-win-x64.exe --repo Dev-Jahn/poe2-rit
 
 ## 로컬 데이터와 개인정보
 
-게임 화면은 외부 인식 서버로 전송하지 않습니다. 가격 조회 시 리그와 아이템·옵션 검색 조건은 해당 시세 서비스로 전달됩니다.
+게임 화면은 외부 인식 서버로 전송하지 않습니다. 자동 시세 갱신은 리그·분류만 poe.ninja에 전달합니다. 수동 거래소 조회 때는 아이템·옵션 검색 조건을 거래소에 전달합니다.
 
 - 분석 원본과 진단 자료: EXE 옆 `captures/`에 자동 저장. 별도 오버레이 창은 캡처에서 제외합니다. **화면에 나타난 캐릭터명이나 대화 등이 포함될 수 있으므로 공개 업로드 전에 직접 확인하세요.** 자동 삭제하지 않습니다.
 - 인식 자료: `%LOCALAPPDATA%/RitualChecker/assets/<자료 해시>/`에 첫 실행 시 자동 전개.
 - 설정: `%LOCALAPPDATA%/RitualChecker/settings.json`.
-- 시세 DB와 서버 대기 기록: `%LOCALAPPDATA%/RitualChecker/`.
+- 시세 DB와 서버 대기 기록: `%LOCALAPPDATA%/RitualChecker/`. 자동 가격은 마지막 확인 후 30분이 지나면 오래됨으로 표시하고, 3시간을 넘기면 사용하지 않습니다.
 - 수동 이름 수정 참조와 진단 시세 자료는 해당 인식 자료 폴더의 `data/`에 저장합니다. 자료 버전이 바뀌면 개인 참조는 자동 이전하지 않습니다.
 
 다운로드는 EXE 하나지만 실행 시 런타임의 네이티브 라이브러리와 인식 자료가 로컬에 전개됩니다. 기존 폴더 배포 버전의 리그/입력 설정은 새 위치로 자동 이전되지 않습니다.
@@ -55,10 +58,10 @@ Windows, .NET 8 SDK, Python 3.13을 준비합니다. 공개 저장소에 고정�
 python -m pip install -r tools/requirements.txt
 ./build.ps1
 python -m pytest tests/test_tools.py -q
-./build.ps1 -Publish -Version 0.1.1
+./build.ps1 -Publish -Version 0.2.0
 ```
 
-결과: `artifacts/0.1.1/RitualChecker-0.1.1-win-x64.exe`와 `SHA256SUMS.txt`.
+결과: `artifacts/0.2.0/RitualChecker-0.2.0-win-x64.exe`와 `SHA256SUMS.txt`.
 WPF 호환성을 위해 trimming은 사용하지 않습니다. 게시 단계는 단일 EXE 외 파일이 생기면 실패합니다.
 
 참조 갱신은 `python tools/update_catalog.py --out data`로 수행합니다. 원격 이미지·옵션 변경은 인식 결과에 영향을 주므로 변경 자료는 다시 검증해야 합니다. 게임 이미지와 정보의 권리는 [별도 출처 안내](THIRD_PARTY_NOTICES.md)를 확인하세요.
@@ -75,6 +78,8 @@ WPF 호환성을 위해 trimming은 사용하지 않습니다. 게시 단계는 
 
 프로젝트 소스는 [MIT](LICENSE)입니다. 게임 아트·텍스트와 외부 의존성에는 각 권리자의 라이선스가 적용됩니다.
 
-[PoE2DB](https://poe2db.tw/) · [PoE2Scout](https://poe2scout.com/) · [시세 연동 참고 프로젝트](https://github.com/Dev-Jahn/poe2-gpt)
+[PoE2DB](https://poe2db.tw/) · [poe.ninja 공개 시세 API](https://poe.ninja/docs/api) · [시세 연동 참고 프로젝트](https://github.com/Dev-Jahn/poe2-gpt)
 
 This product isn't affiliated with or endorsed by Grinding Gear Games in any way.
+
+poe.ninja의 PoE2 원본 시세는 보통 시간 단위로 갱신됩니다. 앱의 30분 갱신은 새 자료 확인 주기이며 틱 단위 실시간 가격을 뜻하지 않습니다. 현재 앱은 저빈도 직접 요청을 사용합니다. 다수 사용자 대상으로 운영할 때는 poe.ninja가 권장하는 공유 캐시 프록시를 준비해야 합니다.

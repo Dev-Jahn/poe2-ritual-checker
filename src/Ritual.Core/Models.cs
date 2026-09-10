@@ -90,7 +90,8 @@ public record PriceQuote(
     string Basis,
     int Samples,
     bool Stale = false,
-    string? Note = null
+    string? Note = null,
+    bool Estimated = false
 );
 
 public record Rate(decimal ExaltedPerDivine, DateTimeOffset RetrievedAt);
@@ -101,6 +102,8 @@ public record Settings
 {
     public string League { get; set; } = "";
     public int KeyboardVirtualKey { get; set; } = 0x77; // F8
+    public int TradeVirtualKey { get; set; } = 0x78; // F9
+    public ushort TradeControllerButtons { get; set; } = 0x0380; // shoulders + right stick
     public uint KeyboardModifiers { get; set; } = 0;
     public ushort ControllerButtons { get; set; } = 0x0300; // both shoulders
     public int ControllerHoldMs { get; set; } = 600;
