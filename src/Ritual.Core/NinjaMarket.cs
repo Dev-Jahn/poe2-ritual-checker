@@ -29,7 +29,6 @@ public record NinjaLookup(PriceQuote? Quote, string Status);
 public sealed class NinjaMarket : IDisposable
 {
     public static readonly TimeSpan RefreshInterval = TimeSpan.FromMinutes(30);
-    public static readonly TimeSpan MaxStaleAge = TimeSpan.FromHours(3);
     public static readonly string[] ExchangeTypes =
     [
         "Currency",
@@ -102,7 +101,7 @@ public sealed class NinjaMarket : IDisposable
             var key = Key(league, category);
             if (
                 !snapshots.ContainsKey(key)
-                && store.Read<NinjaSnapshot>(key, TimeSpan.FromDays(1)) is { } saved
+                && store.Read<NinjaSnapshot>(key, TimeSpan.MaxValue) is { } saved
             )
                 snapshots.TryAdd(key, saved.Data);
         }
@@ -177,7 +176,14 @@ public sealed class NinjaMarket : IDisposable
                         {
                             CheckedAt = now,
                             NextCheck = nextCheck,
-                            Rate = old.Rate is null ? null : old.Rate with { RetrievedAt = now },
+                            Rate =
+                                old.Rate?.RetrievedAt == old.CheckedAt
+                                    ? old.Rate with
+                                    {
+                                        RetrievedAt = now,
+                                        Stale = false,
+                                    }
+                                    : old.Rate,
                         };
                     else
                     {
@@ -193,6 +199,11 @@ public sealed class NinjaMarket : IDisposable
                                 ? tags.FirstOrDefault()
                                 : null
                         );
+                        // A response without an exchange rate does not erase the last observed one.
+                        snapshot = snapshot with
+                        {
+                            Rate = snapshot.Rate ?? old?.Rate ?? GetRate(league),
+                        };
                     }
                     snapshots[key] = snapshot;
                     if (response.Headers.CacheControl?.NoStore != true)
@@ -331,13 +342,21 @@ public sealed class NinjaMarket : IDisposable
 
     public Rate? GetRate(string league)
     {
-        if (
-            !snapshots.TryGetValue(Key(league, "Currency"), out var snapshot)
-            || clock() - snapshot.CheckedAt > RefreshInterval
-        )
-            return null;
-        return snapshot.Rate;
+        var rate = Categories
+            .Select(c => snapshots.GetValueOrDefault(Key(league, c))?.Rate)
+            .Where(r => r is { ExaltedPerDivine: > 0 })
+            .OrderByDescending(r => r!.RetrievedAt)
+            .FirstOrDefault();
+        return MarkRateAge(rate);
     }
+
+    private Rate? MarkRateAge(Rate? rate) =>
+        rate is not { ExaltedPerDivine: > 0 }
+            ? null
+            : rate with
+            {
+                Stale = clock() - rate.RetrievedAt > RefreshInterval,
+            };
 
     public NinjaLookup GetQuote(CatalogItem item, string league, TooltipInfo? tooltip = null)
     {
@@ -348,7 +367,7 @@ public sealed class NinjaMarket : IDisposable
             )
             .ToArray();
         var matches = available
-            .Where(x => x.Snapshot is not null && clock() - x.Snapshot.CheckedAt <= MaxStaleAge)
+            .Where(x => x.Snapshot is not null)
             .SelectMany(x =>
                 x.Snapshot!.Entries.Where(e =>
                         e.Kind == item.Kind
@@ -391,7 +410,8 @@ public sealed class NinjaMarket : IDisposable
                         ? $"기준: {e.Variant} · 옵션별 실매물 확인은 거래소 단축키"
                     : item.Kind == "unique" ? "옵션별 실매물 확인은 거래소 단축키"
                     : null,
-                Estimated: variantUncertain
+                Estimated: variantUncertain,
+                ExchangeRate: MarkRateAge(chosen.Snapshot.Rate) ?? GetRate(league)
             ),
             ""
         );

@@ -8,6 +8,7 @@ public static class Valuation
     {
         if (quantity is null or <= 0)
             return new("수량 미확인", null, true);
+        rate = quote.ExchangeRate ?? rate;
         var total = quote.UnitPrice * quantity.Value;
         decimal? exalted = quote.Currency switch
         {
@@ -24,15 +25,26 @@ public static class Valuation
         else
             text =
                 $"{Number(total)} {(quote.Currency == "exalted" ? "ex" : quote.Currency == "divine" ? "div" : quote.Currency)}";
+        bool stale =
+            quote.Stale
+            || exalted.HasValue
+                && rate is { ExaltedPerDivine: > 0 }
+                && (
+                    rate.Stale
+                    || DateTimeOffset.UtcNow - rate.RetrievedAt > NinjaMarket.RefreshInterval
+                );
         return new(
-            (quote.Estimated ? "≈ " : "") + text + (quote.Stale ? " · 오래됨" : ""),
+            (quote.Estimated ? "≈ " : "") + text + (stale ? "*" : ""),
             exalted,
-            quote.Stale || quote.Estimated
+            stale || quote.Estimated,
+            stale
         );
     }
 
     private static string Number(decimal n) =>
-        n.ToString(n >= 100 ? "0.#" : "0.##", CultureInfo.InvariantCulture);
+        n is > 0 and < .01m
+            ? "<0.01"
+            : n.ToString(n >= 100 ? "0.#" : "0.##", CultureInfo.InvariantCulture);
 
     public static decimal? Efficiency(decimal? totalExalted, int? purchaseTribute, bool reliable) =>
         reliable && totalExalted >= 0 && purchaseTribute > 0

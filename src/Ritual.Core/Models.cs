@@ -91,12 +91,18 @@ public record PriceQuote(
     int Samples,
     bool Stale = false,
     string? Note = null,
-    bool Estimated = false
+    bool Estimated = false,
+    Rate? ExchangeRate = null
 );
 
-public record Rate(decimal ExaltedPerDivine, DateTimeOffset RetrievedAt);
+public record Rate(decimal ExaltedPerDivine, DateTimeOffset RetrievedAt, bool Stale = false);
 
-public record FormattedPrice(string Text, decimal? TotalExalted, bool Estimated);
+public record FormattedPrice(
+    string Text,
+    decimal? TotalExalted,
+    bool Estimated,
+    bool Stale = false
+);
 
 public record Settings
 {

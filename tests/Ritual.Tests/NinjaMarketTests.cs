@@ -25,6 +25,7 @@ public class NinjaMarketTests
         public bool Limited;
         public bool Failing;
         public bool NonStandardETag;
+        public bool MissingRates;
         public int Conditional;
 
         protected override Task<HttpResponseMessage> SendAsync(
@@ -48,7 +49,11 @@ public class NinjaMarketTests
             else
                 r.Headers.ETag = new("\"snapshot-1\"");
             if (!Unchanged)
-                r.Content = new StringContent(Payload, Encoding.UTF8, "application/json");
+                r.Content = new StringContent(
+                    MissingRates ? Payload.Replace("\"exalted\":250", "") : Payload,
+                    Encoding.UTF8,
+                    "application/json"
+                );
             return Task.FromResult(r);
         }
     }
@@ -109,9 +114,9 @@ public class NinjaMarketTests
             await market.RefreshAsync("League", default);
             Assert.Equal(24, handler.Count);
             Assert.True(market.GetQuote(Item("Sacred Bloom"), "League").Quote!.Stale);
-            Assert.Null(market.GetRate("League"));
-            Assert.Contains(
-                "div",
+            Assert.Equal(250, market.GetRate("League")!.ExaltedPerDivine);
+            Assert.Equal(
+                "12.5 ex*",
                 Valuation
                     .Format(
                         market.GetQuote(Item("Sacred Bloom"), "League").Quote!,
@@ -142,7 +147,69 @@ public class NinjaMarketTests
         await market.RefreshAsync("League", default);
         Assert.NotNull(market.GetQuote(Item("Sacred Bloom"), "League").Quote);
         now += TimeSpan.FromHours(4);
-        Assert.Null(market.GetQuote(Item("Sacred Bloom"), "League").Quote);
+        var old = market.GetQuote(Item("Sacred Bloom"), "League").Quote!;
+        Assert.Equal("12.5 ex*", Valuation.Format(old, 1, market.GetRate("League")).Text);
+    }
+
+    [Fact]
+    public void WeekOldPriceAndItsExchangeRateSurviveDatabaseCleanupAndRestart()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var old = now.AddDays(-7);
+        string database = Database();
+        var store = new MarketStore(database);
+        var snapshot = NinjaMarket.Parse(
+            JsonNode.Parse(Payload)!,
+            "Ritual",
+            old,
+            old.AddMinutes(30),
+            null
+        );
+        store.Write("ninja/v1/League/Ritual", snapshot, old);
+        store.Write("temporary-test-record", "expired", old);
+        var handler = new Handler { Failing = true };
+        using var market = new NinjaMarket(database, handler, () => now);
+        market.Load("League");
+        var quote = market.GetQuote(Item("Sacred Bloom"), "League").Quote!;
+        Assert.True(quote.Stale);
+        Assert.Equal(old, quote.RetrievedAt);
+        Assert.Equal("12.5 ex*", Valuation.Format(quote, 1, market.GetRate("League")).Text);
+        Assert.Null(market.GetQuote(Item("Sacred Bloom"), "Other league").Quote);
+        Assert.Null(
+            new MarketStore(database).Read<string>("temporary-test-record", TimeSpan.MaxValue)
+        );
+        Assert.Equal(0, handler.Count);
+    }
+
+    [Fact]
+    public async Task MissingRateInRefreshKeepsPriorRateAnd304DoesNotMakeItFresh()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var handler = new Handler();
+        using var market = new NinjaMarket(Database(), handler, () => now);
+        await market.RefreshAsync("League", default);
+        var rateTime = now;
+        now += TimeSpan.FromMinutes(31);
+        handler.MissingRates = true;
+        await market.RefreshAsync("League", default);
+        var quote = market.GetQuote(Item("Sacred Bloom"), "League").Quote!;
+        Assert.False(quote.Stale);
+        Assert.True(quote.ExchangeRate!.Stale);
+        Assert.Equal("12.5 ex*", Valuation.Format(quote, 1, market.GetRate("League")).Text);
+        now += TimeSpan.FromMinutes(30);
+        handler.Unchanged = true;
+        await market.RefreshAsync("League", default);
+        Assert.Equal(rateTime, market.GetRate("League")!.RetrievedAt);
+        Assert.True(market.GetRate("League")!.Stale);
+        now += TimeSpan.FromMinutes(30);
+        handler.Unchanged = false;
+        handler.MissingRates = false;
+        await market.RefreshAsync("League", default);
+        Assert.False(market.GetRate("League")!.Stale);
+        Assert.Equal(
+            "12.5 ex",
+            Valuation.Format(market.GetQuote(Item("Sacred Bloom"), "League").Quote!, 1, null).Text
+        );
     }
 
     [Fact]

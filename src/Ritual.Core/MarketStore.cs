@@ -22,7 +22,7 @@ public sealed class MarketStore
         using var db = Open();
         using var command = db.CreateCommand();
         command.CommandText =
-            "CREATE TABLE IF NOT EXISTS snapshots (key TEXT PRIMARY KEY, at INTEGER NOT NULL, payload TEXT NOT NULL); DELETE FROM snapshots WHERE at < $cutoff";
+            "CREATE TABLE IF NOT EXISTS snapshots (key TEXT PRIMARY KEY, at INTEGER NOT NULL, payload TEXT NOT NULL); DELETE FROM snapshots WHERE at < $cutoff AND key NOT LIKE 'ninja/v1/%'";
         command.Parameters.AddWithValue(
             "$cutoff",
             DateTimeOffset.UtcNow.AddDays(-2).ToUnixTimeSeconds()

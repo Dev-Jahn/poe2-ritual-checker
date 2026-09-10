@@ -2,11 +2,11 @@
 
 한국어 **컨트롤러 UI**의 의식 보상을 인식하고 아이템별 묶음 시세를 표시하는 Windows 앱입니다. CPU 기반 로컬 영상 인식과 Windows OCR을 사용합니다.
 
-**현재 버전: 0.2.1 — 개발 프리릴리스.** 제공된 개발 캡처의 회귀 검사는 통과했으나 전체 아이템·HDR·모든 화면 환경의 정확도가 입증된 제품은 아닙니다.
+**현재 버전: 0.2.2 — 개발 프리릴리스.** 제공된 개발 캡처의 회귀 검사는 통과했으나 전체 아이템·HDR·모든 화면 환경의 정확도가 입증된 제품은 아닙니다.
 
 ## 다운로드 및 실행
 
-[GitHub Releases](https://github.com/Dev-Jahn/poe2-ritual-checker/releases)에서 `RitualChecker-0.2.1-win-x64.exe` 하나를 내려받아 쓰기 가능한 폴더에서 실행하세요. DLL 폴더나 별도 .NET 설치는 필요 없습니다.
+[GitHub Releases](https://github.com/Dev-Jahn/poe2-ritual-checker/releases)에서 `RitualChecker-0.2.2-win-x64.exe` 하나를 내려받아 쓰기 가능한 폴더에서 실행하세요. DLL 폴더나 별도 .NET 설치는 필요 없습니다.
 
 - Windows 10 2004 이상 또는 Windows 11, x64.
 - 한국어 툴팁 판독에는 Windows 한국어 OCR 언어 기능이 필요합니다.
@@ -17,9 +17,9 @@
 실행 파일은 현재 Authenticode 서명되지 않았습니다. 게시된 SHA-256과 빌드 출처 증명을 확인할 수 있으며, 이는 Windows 코드 서명을 대체하지 않습니다.
 
 ```powershell
-Get-FileHash ./RitualChecker-0.2.1-win-x64.exe -Algorithm SHA256
+Get-FileHash ./RitualChecker-0.2.2-win-x64.exe -Algorithm SHA256
 # GitHub CLI가 설치되어 있으면 빌드 출처 확인:
-gh attestation verify ./RitualChecker-0.2.1-win-x64.exe --repo Dev-Jahn/poe2-ritual-checker
+gh attestation verify ./RitualChecker-0.2.2-win-x64.exe --repo Dev-Jahn/poe2-ritual-checker
 ```
 
 ## 기능
@@ -27,7 +27,7 @@ gh attestation verify ./RitualChecker-0.2.1-win-x64.exe --repo Dev-Jahn/poe2-rit
 - 의식 창과 격자 검출 → 아이템 식별 → 시세 조회 → 입력을 통과시키는 오버레이.
 - 묶음 전체 가격이 1 div 미만이면 ex, 이상이면 div. 환율이 없으면 임의 환산하지 않습니다.
 - 실행 시 선택한 리그의 커런시 14개·고유/서판 9개 분류를 poe.ninja에서 미리 받습니다. 분류당 1회이며 아이템별 요청은 하지 않습니다.
-- 캡처 여부와 관계없이 30분마다 갱신합니다. 재실행해도 유효한 디스크 캐시를 재사용하며, 변경되지 않은 응답은 ETag로 확인합니다. 실패한 갱신은 기존 가격을 지우지 않고 오래됨을 표시합니다.
+- 캡처 여부와 관계없이 30분마다 갱신합니다. 재실행해도 디스크 캐시를 재사용하며, 변경되지 않은 응답은 ETag로 확인합니다. 갱신 실패 시 마지막 가격과 환율로 계속 표시하고 `*`만 붙입니다. 조회 시각과 환율은 항목 상세에서 확인합니다.
 - 화면 분석과 자동 툴팁 판독은 로컬 시세만 사용합니다. 최초 설치나 리그 변경 직후에는 초기 자료를 받는 시간이 필요합니다.
 - 같은 고유 이름에 여러 장비 변형이 있으면 매물 표본이 가장 많은 변형의 대표값을 `≈`로 표시합니다. 현재 장비의 변형/옵션이 확인된 가격으로 취급하지 않으며 공물 효율 순위에서 제외합니다.
 - **거래소 자동 검색은 하지 않습니다.** 안정된 고유 툴팁을 띄운 상태에서 **F9** 또는 **LB+RB+오른쪽 스틱 누르기**로 해당 아이템만 조회합니다. 키보드 조회 키는 입력 설정에서 변경할 수 있습니다. 제한에 걸리면 표시된 시간 이후 사용자가 다시 요청합니다.
@@ -45,7 +45,7 @@ gh attestation verify ./RitualChecker-0.2.1-win-x64.exe --repo Dev-Jahn/poe2-rit
 - 분석 원본과 진단 자료: EXE 옆 `captures/`에 자동 저장. 별도 오버레이 창은 캡처에서 제외합니다. **화면에 나타난 캐릭터명이나 대화 등이 포함될 수 있으므로 공개 업로드 전에 직접 확인하세요.** 자동 삭제하지 않습니다.
 - 인식 자료: `%LOCALAPPDATA%/RitualChecker/assets/<자료 해시>/`에 첫 실행 시 자동 전개.
 - 설정: `%LOCALAPPDATA%/RitualChecker/settings.json`.
-- 시세 DB와 서버 대기 기록: `%LOCALAPPDATA%/RitualChecker/`. 자동 가격은 마지막 확인 후 30분이 지나면 오래됨으로 표시하고, 3시간을 넘기면 사용하지 않습니다.
+- 시세 DB와 서버 대기 기록: `%LOCALAPPDATA%/RitualChecker/`. poe.ninja 가격·환율은 시간 경과만으로 삭제하지 않습니다. 마지막 확인 후 30분이 지나면 `*`를 붙이며, 가격 응답에 포함된 환율을 함께 보관해 표시 단위와 환산에 사용합니다.
 - 수동 이름 수정 참조와 진단 시세 자료는 해당 인식 자료 폴더의 `data/`에 저장합니다. 자료 버전이 바뀌면 개인 참조는 자동 이전하지 않습니다.
 
 다운로드는 EXE 하나지만 실행 시 런타임의 네이티브 라이브러리와 인식 자료가 로컬에 전개됩니다. 기존 폴더 배포 버전의 리그/입력 설정은 새 위치로 자동 이전되지 않습니다.
@@ -58,10 +58,10 @@ Windows, .NET 8 SDK, Python 3.13을 준비합니다. 공개 저장소에 고정�
 python -m pip install -r tools/requirements.txt
 ./build.ps1
 python -m pytest tests/test_tools.py -q
-./build.ps1 -Publish -Version 0.2.1
+./build.ps1 -Publish -Version 0.2.2
 ```
 
-결과: `artifacts/0.2.1/RitualChecker-0.2.1-win-x64.exe`와 `SHA256SUMS.txt`.
+결과: `artifacts/0.2.2/RitualChecker-0.2.2-win-x64.exe`와 `SHA256SUMS.txt`.
 WPF 호환성을 위해 trimming은 사용하지 않습니다. 게시 단계는 단일 EXE 외 파일이 생기면 실패합니다.
 
 참조 갱신은 `python tools/update_catalog.py --out data`로 수행합니다. 원격 이미지·옵션 변경은 인식 결과에 영향을 주므로 변경 자료는 다시 검증해야 합니다. 게임 이미지와 정보의 권리는 [별도 출처 안내](THIRD_PARTY_NOTICES.md)를 확인하세요.

@@ -973,8 +973,14 @@ public sealed class MainWindow : Window
             var quote = cache.Read(key);
             if (quote is null || quote.Stale)
             {
-                var result = await trade.QuoteAsync(item, league, rate, active.Info, token);
-                quote = result.Quote;
+                var requestRate = rate;
+                var result = await trade.QuoteAsync(item, league, requestRate, active.Info, token);
+                quote = result.Quote is null
+                    ? null
+                    : result.Quote with
+                    {
+                        ExchangeRate = requestRate,
+                    };
                 if (quote is not null)
                     cache.Write(key, quote);
             }
@@ -1404,7 +1410,15 @@ public sealed class MainWindow : Window
                 Presentation.PendingPrice(!string.IsNullOrWhiteSpace(settings.League))
             );
             if (quote is not null && item.Quantity is null)
-                formatted = new(Valuation.Format(quote, 1, rate).Text + "/개 · 수량?", null, true);
+            {
+                var unit = Valuation.Format(quote, 1, rate);
+                formatted = unit with
+                {
+                    Text = unit.Text + "/개 · 수량?",
+                    TotalExalted = null,
+                    Estimated = true,
+                };
+            }
             var price = formatted?.Text ?? state;
             if (quote is not null && priceStates.TryGetValue(item.InstanceId, out var refreshing))
                 price += " · " + refreshing;
@@ -1415,12 +1429,21 @@ public sealed class MainWindow : Window
                         ? state
                         : $"{quote.Source} · {quote.Basis}\n단가 {quote.UnitPrice:0.####} {quote.Currency} · 표본 {quote.Samples}\n조회 {quote.RetrievedAt.ToLocalTime():g}\n{quote.Note}"
                 );
+            var exchangeRate = quote?.ExchangeRate ?? rate;
+            if (quote is not null)
+            {
+                if (formatted?.Stale == true)
+                    detail += "\n* 이전에 조회한 가격 또는 환율 사용";
+                detail += exchangeRate is not null
+                    ? $"\n환율 1 div = {exchangeRate.ExaltedPerDivine:0.##} ex · 확인 {exchangeRate.RetrievedAt.ToLocalTime():g}"
+                    : "\n환율 기록 없음 · 원래 통화로 표시";
+            }
             if (tooltips.TryGetValue(item.InstanceId, out var info))
             {
                 var efficiency = Valuation.Efficiency(
                     formatted?.TotalExalted,
                     info.PurchaseTribute,
-                    !item.Estimated && quote is { Stale: false, Estimated: false }
+                    !item.Estimated && formatted is { Estimated: false }
                 );
                 detail +=
                     $"\n구매 공물 {info.PurchaseTribute?.ToString() ?? "미확인"} · 공물 1,000점당 {efficiency?.ToString("0.##") ?? "미확인"} ex";
@@ -1453,7 +1476,7 @@ public sealed class MainWindow : Window
                         : price,
                     detail,
                     quote?.Estimated == true ? null : formatted?.TotalExalted,
-                    rate?.ExaltedPerDivine
+                    exchangeRate?.ExaltedPerDivine
                 )
             );
         }
