@@ -11,6 +11,7 @@ public sealed class VisionEngine : IDisposable
     private readonly Mat title;
     private readonly Mat tribute;
     private readonly Mat deferModeIcon;
+    private readonly Mat deferActionLabel;
     private readonly Mat deferredMarker;
     private readonly List<Reference> references = [];
     private readonly EmbeddingModel? embedding;
@@ -94,6 +95,10 @@ public sealed class VisionEngine : IDisposable
         );
         deferModeIcon = Cv2.ImRead(
             Path.Combine(dataDirectory, "ui", "defer-mode-icon.png"),
+            ImreadModes.Grayscale
+        );
+        deferActionLabel = Cv2.ImRead(
+            Path.Combine(dataDirectory, "ui", "defer-action-label.png"),
             ImreadModes.Grayscale
         );
         if (empty.Empty())
@@ -716,38 +721,50 @@ public sealed class VisionEngine : IDisposable
         return best is not null && VerifyRitualWindow(bgr, best) ? best : null;
     }
 
-    public bool VerifyRitualWindow(Mat bgr, GridObservation grid)
+    private static double MatchUi(
+        Mat bgr,
+        GridObservation grid,
+        Mat template,
+        double x,
+        double y,
+        double width,
+        double height
+    )
     {
         var c = grid.CellSize;
-        double Match(Mat template, double x, double y, double width, double height)
-        {
-            var box = new Box(
-                (int)(grid.Bounds.X + c * x),
-                (int)(grid.Bounds.Y + c * y),
-                (int)(c * width),
-                (int)(c * height)
-            );
-            if (template.Empty() || !Within(box, bgr))
-                return 0;
-            using var crop = new Mat(bgr, box.Rect());
-            using var gray = new Mat();
-            Cv2.CvtColor(crop, gray, ColorConversionCodes.BGR2GRAY);
-            using var reference = new Mat();
-            Cv2.Resize(template, reference, new Size(), c / 70, c / 70);
-            if (reference.Width > gray.Width || reference.Height > gray.Height)
-                return 0;
-            using var scores = new Mat();
-            Cv2.MatchTemplate(gray, reference, scores, TemplateMatchModes.CCoeffNormed);
-            Cv2.MinMaxLoc(scores, out _, out double max);
-            return max;
-        }
-        if (Match(title, 4, -2.8, 4, 1.5) > .60)
+        var box = new Box(
+            (int)(grid.Bounds.X + c * x),
+            (int)(grid.Bounds.Y + c * y),
+            (int)(c * width),
+            (int)(c * height)
+        );
+        if (template.Empty() || !Within(box, bgr))
+            return 0;
+        using var crop = new Mat(bgr, box.Rect());
+        using var gray = new Mat();
+        Cv2.CvtColor(crop, gray, ColorConversionCodes.BGR2GRAY);
+        using var reference = new Mat();
+        Cv2.Resize(template, reference, new Size(), c / 70, c / 70);
+        if (reference.Width > gray.Width || reference.Height > gray.Height)
+            return 0;
+        using var scores = new Mat();
+        Cv2.MatchTemplate(gray, reference, scores, TemplateMatchModes.CCoeffNormed);
+        Cv2.MinMaxLoc(scores, out _, out double max);
+        return max;
+    }
+
+    public bool VerifyRitualWindow(Mat bgr, GridObservation grid)
+    {
+        if (MatchUi(bgr, grid, title, 4, -2.8, 4, 1.5) > .60)
             return true;
         // Defer help covers the title; the centered tribute line can shift as costs change.
-        if (Match(tribute, 1.5, -1.55, 8.7, 1.5) > .73)
+        if (MatchUi(bgr, grid, tribute, 1.5, -1.55, 8.7, 1.5) > .73)
             return true;
-        // If both text anchors are covered, require a control shape and grid texture together.
-        return Match(deferModeIcon, 10, -1.5, 1.3, 1.4) > .78 && VerifyGridCells(bgr, grid);
+        // Help and failure banners can cover every header anchor; the bottom action stays visible.
+        return (
+                MatchUi(bgr, grid, deferModeIcon, 10, -1.5, 1.3, 1.4) > .78
+                || HasDeferAction(bgr, grid)
+            ) && VerifyGridCells(bgr, grid);
     }
 
     private bool VerifyGridCells(Mat bgr, GridObservation grid)
@@ -780,7 +797,10 @@ public sealed class VisionEngine : IDisposable
         return false;
     }
 
-    public static bool IsDeferMode(Mat bgr, GridObservation grid)
+    private bool HasDeferAction(Mat bgr, GridObservation grid) =>
+        MatchUi(bgr, grid, deferActionLabel, 4, 11.3, 4, 1) > .82;
+
+    public bool IsDeferMode(Mat bgr, GridObservation grid)
     {
         var c = grid.CellSize;
         var b = new Box(
@@ -790,13 +810,14 @@ public sealed class VisionEngine : IDisposable
             (int)(1.3 * c)
         );
         if (!Within(b, bgr))
-            return false;
+            return HasDeferAction(bgr, grid);
         using var crop = new Mat(bgr, b.Rect());
         using var hsv = new Mat();
         Cv2.CvtColor(crop, hsv, ColorConversionCodes.BGR2HSV);
         using var red = new Mat();
         Cv2.InRange(hsv, new Scalar(0, 130, 70), new Scalar(8, 255, 255), red);
-        return Cv2.CountNonZero(red) / (double)(red.Width * red.Height) > .12;
+        return Cv2.CountNonZero(red) / (double)(red.Width * red.Height) > .12
+            || HasDeferAction(bgr, grid);
     }
 
     public static Box CellBox(GridObservation grid, int x, int y, int w, int h)
@@ -1159,6 +1180,7 @@ public sealed class VisionEngine : IDisposable
         title.Dispose();
         tribute.Dispose();
         deferModeIcon.Dispose();
+        deferActionLabel.Dispose();
         deferredMarker.Dispose();
     }
 }

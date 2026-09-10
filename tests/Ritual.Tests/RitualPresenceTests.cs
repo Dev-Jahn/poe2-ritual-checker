@@ -72,6 +72,55 @@ public class RitualPresenceTests
         Assert.False(vision.VerifyRitualWindow(image, grid));
     }
 
+    [Theory]
+    [InlineData(.75)]
+    [InlineData(1)]
+    [InlineData(1.5)]
+    [InlineData(2)]
+    public void DeferFailureKeepsSessionAliveWithEveryHeaderAnchorCovered(double scale)
+    {
+        string data = Data();
+        using var vision = new VisionEngine(data);
+        using var original = new Mat(1200, 1100, MatType.CV_8UC3, Scalar.All(0));
+        using var cell = Cv2.ImRead(Path.Combine(data, "ui", "empty-cell.png"));
+        using var label = Cv2.ImRead(Path.Combine(data, "ui", "defer-action-label.png"));
+        for (int y = 0; y < 10; y++)
+        for (int x = 0; x < 12; x++)
+            Paste(original, cell, 106 + x * 70, 274 + y * 70);
+        Paste(original, label, 473, 1081);
+        var grid = new GridObservation(
+            new Box((int)(100 * scale), (int)(270 * scale), (int)(840 * scale), (int)(700 * scale)),
+            70 * scale,
+            1
+        );
+        using var scaled = new Mat();
+        Cv2.Resize(original, scaled, new Size(), scale, scale);
+        Assert.True(vision.IsDeferMode(scaled, grid));
+        var presence = new RitualPresence();
+        // A persistent notification must not accumulate misses and stop capture.
+        for (int frame = 0; frame < 4; frame++)
+        {
+            bool visible = vision.VerifyRitualWindow(scaled, grid);
+            Assert.True(visible);
+            Assert.False(presence.Observe(visible));
+        }
+        // The action label alone does not prove that the Ritual grid is still open.
+        original.SetTo(Scalar.All(0));
+        Paste(original, label, 473, 1081);
+        Cv2.Resize(original, scaled, new Size(), scale, scale);
+        Assert.False(vision.VerifyRitualWindow(scaled, grid));
+        Assert.False(presence.Observe(false));
+        Assert.True(presence.Observe(false));
+        // Grid texture alone remains insufficient, and must not imply defer mode.
+        original.SetTo(Scalar.All(0));
+        for (int y = 0; y < 10; y++)
+        for (int x = 0; x < 12; x++)
+            Paste(original, cell, 106 + x * 70, 274 + y * 70);
+        Cv2.Resize(original, scaled, new Size(), scale, scale);
+        Assert.False(vision.VerifyRitualWindow(scaled, grid));
+        Assert.False(vision.IsDeferMode(scaled, grid));
+    }
+
     [Fact]
     public void TransitionMissDoesNotCloseAndAValidFrameResetsTheCount()
     {

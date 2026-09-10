@@ -101,7 +101,7 @@ if (args[0] == "window-state")
                 file = Path.GetFileName(path),
                 detected,
                 trackedVisible = previous is null ? detected is not null : visible,
-                deferMode = detected is not null && VisionEngine.IsDeferMode(pixels, detected),
+                deferMode = detected is not null && detector.IsDeferMode(pixels, detected),
                 checkMs = elapsed,
             }
         );

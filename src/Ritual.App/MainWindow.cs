@@ -1151,7 +1151,7 @@ public sealed class MainWindow : Window
             var tooltip = VisionEngine.DetectTooltip(current.Image, grid);
             var changed = VisionEngine.SceneDifference(frame, current.Image, grid);
             if (
-                VisionEngine.IsDeferMode(current.Image, grid) != analysis.DeferMode
+                vision.IsDeferMode(current.Image, grid) != analysis.DeferMode
                 || changed > .025 && tooltip is null
             )
             {

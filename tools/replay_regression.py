@@ -63,9 +63,13 @@ def main():
             continue
         a = json.loads(result.read_text(encoding="utf8"))
         times.append(a["elapsedMs"])
-        instances += len(r["items"])
+        instances += len(r.get("items", []))
         if not a["grid"]:
-            errors.append(dict(file=r["file"], kind="missing_grid"))
+            if r["grid"] is not None:
+                errors.append(dict(file=r["file"], kind="missing_grid"))
+            continue
+        if r["grid"] is None:
+            errors.append(dict(file=r["file"], kind="unexpected_grid"))
             continue
         g = a["grid"]["bounds"]
         eg = r["grid"]
@@ -73,6 +77,11 @@ def main():
             errors.append(
                 dict(file=r["file"], kind="grid_geometry", actual=g, expected=eg)
             )
+        if "deferMode" in r and a["deferMode"] != r["deferMode"]:
+            errors.append(dict(file=r["file"], kind="defer_mode"))
+        # Some new captures have reviewed window state but no item-level ground truth yet.
+        if r.get("windowOnly"):
+            continue
         observed = {i["instanceId"]: i for i in a["items"]}
         expected = {i["instanceId"]: i for i in r["items"]}
         if observed.keys() != expected.keys():
@@ -149,6 +158,7 @@ def main():
         fullReleaseGatePassed=False,
         notEstablished=manifest["notEstablished"],
         frames=len(manifest["records"]),
+        windowOnlyFrames=sum(bool(r.get("windowOnly")) for r in manifest["records"]),
         uniqueImages=len(set(r["sha256"] for r in manifest["records"])),
         instances=instances,
         tooltipFrames=tooltip_count,
