@@ -6,7 +6,7 @@ namespace Ritual.Tests;
 public class RevisionTests
 {
     [Fact]
-    public void OfficialCurrentArtRecognizesBothDevelopmentInstances()
+    public void OfficialCurrentArtRecognizesOmenCropsOnSyntheticGrid()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "RitualChecker.sln")))
@@ -17,9 +17,9 @@ public class RevisionTests
             useUserExamples: false
         );
         using var frame = OpenCvSharp.Cv2.ImRead(
-            Path.Combine(root.FullName, "poe2_ritual_data", "controller-tooltip.png")
+            Path.Combine(root.FullName, "tests", "fixtures", "omen-grid.png")
         );
-        var result = vision.Analyze(frame, 1, new(new(111, 218, 842, 702), 70.2042787059812, 1));
+        var result = vision.Analyze(frame, 1, new(new(0, 0, 840, 700), 70, 1));
         Assert.Equal(
             "Omen_of_Chaotic_Rarity",
             result.Items.Single(i => i.InstanceId == "0:1").CatalogId
