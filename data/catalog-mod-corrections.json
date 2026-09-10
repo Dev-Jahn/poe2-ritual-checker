@@ -1,0 +1,13 @@
+{
+  "corrections": [
+    {
+      "id": "Chober_Chaber",
+      "source": "https://poe2db.tw/us/Chober_Chaber",
+      "versionSource": "https://poe2db.tw/us/Version_0.5.0",
+      "checkedAt": "2026-09-11",
+      "reason": "The modifier table still says +1, while the version history says +2–3 and the embedded trade item has +2. A supplied game tooltip also shows +2.",
+      "modsEn": { "+1 to Level of all Minion Skills": "+(2 — 3) to Level of all Minion Skills" },
+      "modsKo": { "모든 소환수 스킬 레벨 +1": "모든 소환수 스킬 레벨 +(2 — 3)" }
+    }
+  ]
+}

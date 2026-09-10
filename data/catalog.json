@@ -1,5 +1,5 @@
 {
-  "version": "1bb560c48ccb83a2",
+  "version": "9d4d8a79f16f1e8b",
   "retrievedAt": "2026-09-09T21:22:56.113819+00:00",
   "items": [
     {
@@ -397,7 +397,7 @@
         "Adds (58 — 65) to (102 — 110) Physical Damage",
         "+(80 — 100) to maximum Mana",
         "+50 to Spirit",
-        "+1 to Level of all Minion Skills",
+        "+(2 — 3) to Level of all Minion Skills",
         "Increases and Reductions to Minion Damage also affect you"
       ],
       "modsKo": [
@@ -405,7 +405,7 @@
         "물리 피해 (58 — 65) ~ (102 — 110) 추가",
         "마나 최대치 +(80 — 100)",
         "정신력 +50",
-        "모든 소환수 스킬 레벨 +1",
+        "모든 소환수 스킬 레벨 +(2 — 3)",
         "소환수 피해의 증가 및 감소가 자신에게도 적용"
       ],
       "maxStackSize": null

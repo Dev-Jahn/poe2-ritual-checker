@@ -77,6 +77,25 @@ def parse_page(html, kind, language):
     return rows
 
 
+def apply_mod_corrections(items, path):
+    corrections = json.loads(path.read_text(encoding="utf-8"))["corrections"]
+    by_id = {item["id"]: item for item in items}
+    for correction in corrections:
+        item = by_id.get(correction["id"])
+        if item is None:
+            raise ValueError(f"Corrected item missing: {correction['id']}")
+        for language in ("modsEn", "modsKo"):
+            for old, new in correction[language].items():
+                matches = [
+                    i for i, mod in enumerate(item[language]) if mod in (old, new)
+                ]
+                if len(matches) != 1:
+                    raise ValueError(
+                        f"Review changed modifier: {correction['id']} {language}"
+                    )
+                item[language][matches[0]] = new
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--out", type=Path, default=Path("data"))
@@ -176,6 +195,9 @@ def main():
         )
     stamp = datetime.now(timezone.utc).isoformat()
     items = list({item["id"]: item for item in items}.values())
+    apply_mod_corrections(
+        items, Path(__file__).resolve().parents[1] / "data/catalog-mod-corrections.json"
+    )
     body = dict(
         version=hashlib.sha256(json.dumps(items, sort_keys=True).encode()).hexdigest()[
             :16

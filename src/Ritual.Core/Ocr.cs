@@ -381,11 +381,13 @@ public sealed class TextReaderEngine
             .DefaultIfEmpty(0)
             .Max();
         var options = blueLines.Where(l => l.Top > separator).Select(l => l.Text).ToArray();
+        var selected = analysis.Items.Where(i => i.Selected).ToArray();
         var parsed = TooltipParser.Parse(
             kept.ToArray(),
             catalog,
             analysis.DeferMode,
-            options.Length > 0 ? options : null
+            options.Length > 0 ? options : null,
+            selected.Length == 1 ? selected[0] : null
         );
         return parsed is null
             ? null
@@ -425,7 +427,8 @@ public static class TooltipParser
         string[] lines,
         Catalog catalog,
         bool deferMode = false,
-        string[]? optionLines = null
+        string[]? optionLines = null,
+        ItemObservation? selectedItem = null
     )
     {
         if (lines.Length == 0)
@@ -456,6 +459,19 @@ public static class TooltipParser
                 && (near.Length == 1 || near[1].Distance >= near[0].Distance + 2)
             )
                 matches = [near[0].Item];
+        }
+        if (
+            matches.Length == 0
+            && selectedItem is { Selected: true, Estimated: false, Confidence: >= .90 }
+        )
+        {
+            var selected = catalog.Items.SingleOrDefault(i => i.Id == selectedItem.CatalogId);
+            if (
+                selected is { Kind: "unique" }
+                && TooltipBinding.Fits(selectedItem, selected)
+                && CorroboratesName(nameKeys, optionLines ?? lines, selected, catalog)
+            )
+                matches = [selected];
         }
         if (matches.Length != 1)
             return null;
@@ -523,6 +539,48 @@ public static class TooltipParser
             complete,
             raw
         );
+    }
+
+    private static bool CorroboratesName(
+        HashSet<string> nameKeys,
+        string[] optionLines,
+        CatalogItem selected,
+        Catalog catalog
+    )
+    {
+        // Hangul OCR can change two syllables by misreading only two consonants/vowels.
+        // Require the selected icon, an unambiguous nearby name, and three valid stats.
+        string Decompose(string s) => Key(s).Normalize(System.Text.NormalizationForm.FormD);
+        var names = nameKeys.Where(k => k.Length >= 4).Select(Decompose).ToArray();
+        if (names.Length == 0 || Key(selected.NameKo).Length < 4)
+            return false;
+        var nearby = catalog
+            .Items.Where(i => i.NameKo.Length > 0)
+            .Select(i => new { i.Id, Distance = names.Min(n => Distance(n, Decompose(i.NameKo))) })
+            .OrderBy(i => i.Distance)
+            .Take(2)
+            .ToArray();
+        if (
+            nearby.Length == 0
+            || nearby[0].Id != selected.Id
+            || nearby[0].Distance > 2
+            || nearby[0].Distance > Decompose(selected.NameKo).Length * .25
+            || nearby.Length > 1 && nearby[1].Distance < nearby[0].Distance + 2
+        )
+            return false;
+        int verified = 0;
+        for (int i = 0; i < Math.Min(selected.ModsKo.Length, selected.ModsEn.Length); i++)
+        {
+            var matching = optionLines
+                .Where(l => ModKey(l) == ModKey(selected.ModsKo[i]))
+                .ToArray();
+            if (
+                matching.Length == 1
+                && TranslateNumbers(selected.ModsKo[i], selected.ModsEn[i], matching[0]) is not null
+            )
+                verified++;
+        }
+        return verified >= 3 && verified * 2 >= selected.ModsKo.Length;
     }
 
     internal static int? TributeAmount(string text)

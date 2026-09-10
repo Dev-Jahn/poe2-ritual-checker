@@ -23,6 +23,7 @@ captures/
 *.trx
 /data/*
 !/data/catalog.json
+!/data/catalog-mod-corrections.json
 !/data/embedding.json
 !/data/official-references.json
 !/data/images/
