@@ -1,0 +1,26 @@
+name: Checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - shell: pwsh
+        run: |
+          python tools/check_publication.py
+          if ($LASTEXITCODE) { throw 'Publication audit failed' }
+          ./build.ps1
+          python -m pip install -r tools/requirements.txt
+          python -m pytest tests/test_tools.py -q
+          if ($LASTEXITCODE) { throw 'Python tests failed' }

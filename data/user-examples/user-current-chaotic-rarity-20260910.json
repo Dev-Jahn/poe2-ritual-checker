@@ -1,0 +1,11 @@
+{
+  "catalogId": "Omen_of_Chaotic_Rarity",
+  "source": "manual",
+  "session": "user-current-art-20260910",
+  "catalogVersion": "4bf4f15d776d5fba",
+  "verifiedBy": "user",
+  "verification": "Current artwork and item name confirmed against the game reference.",
+  "sourceImageSha256": "1eea33c5a7ad91d9ad9abc3c679485995e5d0a1df348ad08a6d11f0680abc937",
+  "split": "development",
+  "independent": false
+}

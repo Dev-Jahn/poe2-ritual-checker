@@ -1,0 +1,101 @@
+[
+  {
+    "package": "Microsoft.Data.Sqlite/8.0.31",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": []
+  },
+  {
+    "package": "Microsoft.Data.Sqlite.Core/8.0.31",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": []
+  },
+  {
+    "package": "OpenCvSharp4/4.11.0.20250507",
+    "license": "Apache-2.0 https://licenses.nuget.org/Apache-2.0",
+    "files": []
+  },
+  {
+    "package": "OpenCvSharp4.runtime.win/4.11.0.20250507",
+    "license": "Apache-2.0 https://licenses.nuget.org/Apache-2.0",
+    "files": []
+  },
+  {
+    "package": "SharpGen.Runtime/2.4.2-beta",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": []
+  },
+  {
+    "package": "SharpGen.Runtime.COM/2.4.2-beta",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": []
+  },
+  {
+    "package": "SQLitePCLRaw.bundle_e_sqlite3/2.1.12",
+    "license": "Apache-2.0 https://licenses.nuget.org/Apache-2.0",
+    "files": []
+  },
+  {
+    "package": "SQLitePCLRaw.core/2.1.12",
+    "license": "Apache-2.0 https://licenses.nuget.org/Apache-2.0",
+    "files": []
+  },
+  {
+    "package": "SQLitePCLRaw.lib.e_sqlite3/2.1.12",
+    "license": "Apache-2.0 https://licenses.nuget.org/Apache-2.0",
+    "files": []
+  },
+  {
+    "package": "SQLitePCLRaw.provider.e_sqlite3/2.1.12",
+    "license": "Apache-2.0 https://licenses.nuget.org/Apache-2.0",
+    "files": []
+  },
+  {
+    "package": "System.IO.Pipelines/9.0.1",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": [
+      "third-party/licenses/System.IO.Pipelines-9.0.1/LICENSE.TXT",
+      "third-party/licenses/System.IO.Pipelines-9.0.1/THIRD-PARTY-NOTICES.TXT"
+    ]
+  },
+  {
+    "package": "System.Memory/4.6.3",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": []
+  },
+  {
+    "package": "System.Text.Encodings.Web/9.0.1",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": [
+      "third-party/licenses/System.Text.Encodings.Web-9.0.1/LICENSE.TXT",
+      "third-party/licenses/System.Text.Encodings.Web-9.0.1/THIRD-PARTY-NOTICES.TXT"
+    ]
+  },
+  {
+    "package": "System.Text.Json/9.0.1",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": [
+      "third-party/licenses/System.Text.Json-9.0.1/LICENSE.TXT",
+      "third-party/licenses/System.Text.Json-9.0.1/THIRD-PARTY-NOTICES.TXT"
+    ]
+  },
+  {
+    "package": "Vortice.Direct3D11/3.8.3",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": []
+  },
+  {
+    "package": "Vortice.DirectX/3.8.3",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": []
+  },
+  {
+    "package": "Vortice.DXGI/3.8.3",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": []
+  },
+  {
+    "package": "Vortice.Mathematics/2.1.0",
+    "license": "MIT https://licenses.nuget.org/MIT",
+    "files": []
+  }
+]
