@@ -434,8 +434,8 @@ public sealed class MainWindow : Window
         {
             SetStatus("참조 카탈로그 준비 중…");
             vision = await Task.Run(() => new VisionEngine(data));
-            ocr.NonStackable.UnionWith(
-                vision.Catalog.Items.Where(i => i.MaxStackSize == 1).Select(i => i.Id)
+            ocr.SingleQuantityItems.UnionWith(
+                vision.Catalog.Items.Where(RitualQuantity.IsSingle).Select(i => i.Id)
             );
             correction.ItemsSource = vision.Catalog.Items.OrderBy(i => i.NameKo).ToArray();
             if (!launchArgs.Contains("--ui-shot"))
@@ -1269,7 +1269,7 @@ public sealed class MainWindow : Window
                             Name = VisionEngine.DisplayName(known),
                             Kind = known.Kind,
                             Estimated = false,
-                            Quantity = known.Kind == "unique" ? 1 : i.Quantity,
+                            Quantity = RitualQuantity.ForIdentification(known, i),
                         }
                         : i
                 )
@@ -1313,7 +1313,7 @@ public sealed class MainWindow : Window
                             Name = VisionEngine.DisplayName(known),
                             Kind = known.Kind,
                             Estimated = false,
-                            Quantity = known.Kind == "unique" ? 1 : i.Quantity,
+                            Quantity = RitualQuantity.ForIdentification(known, i),
                         }
                         : i
                 )

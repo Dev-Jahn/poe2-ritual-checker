@@ -494,7 +494,7 @@ public sealed class VisionEngine : IDisposable
                     item.Id,
                     DisplayName(item),
                     item.Kind,
-                    item.Kind == "unique" || item.MaxStackSize == 1 ? 1 : ReadQuantity(crop),
+                    RitualQuantity.ForIdentification(item),
                     p.Score,
                     p.Score < .80 || margin < .08,
                     Deferred(crop, c),
@@ -1132,12 +1132,6 @@ public sealed class VisionEngine : IDisposable
                 neutral++;
         }
         return bright > 15 && neutral > bright * .78;
-    }
-
-    private static int? ReadQuantity(Mat crop)
-    {
-        // Digits are read by the dedicated OCR pass, never assume a missing digit is one.
-        return null;
     }
 
     public static Box? DetectTooltip(Mat bgr, GridObservation grid)

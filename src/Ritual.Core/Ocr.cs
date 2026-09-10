@@ -10,7 +10,7 @@ namespace Ritual.Core;
 public sealed class TextReaderEngine
 {
     private readonly List<Mat> ones = [];
-    public HashSet<string> NonStackable { get; } = [];
+    public HashSet<string> SingleQuantityItems { get; } = [];
 
     public void LoadDigitReference(string path)
     {
@@ -73,7 +73,26 @@ public sealed class TextReaderEngine
         CancellationToken token
     )
     {
-        if (engine is null || analysis.Grid is null)
+        if (analysis.Grid is null)
+            return analysis;
+        bool NeedsDigits(ItemObservation item) =>
+            item.Kind == "currency"
+            && !(item.CatalogId is { } id && SingleQuantityItems.Contains(id));
+        analysis = analysis with
+        {
+            Items = analysis
+                .Items.Select(item =>
+                    item.Kind == "unique"
+                    || item.CatalogId is { } id && SingleQuantityItems.Contains(id)
+                        ? item with
+                        {
+                            Quantity = 1,
+                        }
+                        : item
+                )
+                .ToArray(),
+        };
+        if (engine is null || !analysis.Items.Any(NeedsDigits))
             return analysis;
         var grid = analysis.Grid;
         using var crop = new Mat(frame, grid.Bounds.Rect());
@@ -86,10 +105,7 @@ public sealed class TextReaderEngine
         var items = analysis
             .Items.Select(item =>
             {
-                if (
-                    item.Kind != "currency"
-                    || item.CatalogId is { } id && NonStackable.Contains(id)
-                )
+                if (!NeedsDigits(item))
                     return item;
                 var numbers = words
                     .Where(w =>
@@ -111,7 +127,7 @@ public sealed class TextReaderEngine
                 return item with { Quantity = numbers.Length == 1 ? numbers[0] : null };
             })
             .ToArray();
-        var unknown = items.Where(i => i.Kind == "currency" && i.Quantity is null).ToArray();
+        var unknown = items.Where(i => NeedsDigits(i) && i.Quantity is null).ToArray();
         if (unknown.Length > 0)
         {
             const int tileW = 160,
@@ -176,7 +192,7 @@ public sealed class TextReaderEngine
             for (int i = 0; i < items.Length; i++)
             {
                 var item = items[i];
-                if (item.Kind != "currency" || NonStackable.Contains(item.CatalogId ?? ""))
+                if (!NeedsDigits(item))
                     continue;
                 bool verified = false;
                 foreach (int threshold in new[] { 170, 140, 100, 70 })

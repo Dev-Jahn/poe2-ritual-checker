@@ -152,7 +152,9 @@ using var vision = new VisionEngine(
 var ocr = new TextReaderEngine();
 var output = Path.GetFullPath(Option("--out", "work/analysis"));
 Directory.CreateDirectory(output);
-ocr.NonStackable.UnionWith(vision.Catalog.Items.Where(i => i.MaxStackSize == 1).Select(i => i.Id));
+ocr.SingleQuantityItems.UnionWith(
+    vision.Catalog.Items.Where(RitualQuantity.IsSingle).Select(i => i.Id)
+);
 ocr.LoadDigitReference(Path.Combine(data, "ui", "quantity-one.png"));
 var paths = Directory.Exists(args[1]) ? Directory.GetFiles(args[1], "*.png") : new[] { args[1] };
 var summary = new List<object>();
