@@ -1,4 +1,4 @@
-param([switch]$Publish, [string]$Version = '0.2.0')
+param([switch]$Publish, [string]$Version = '0.2.1')
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 if ($Version -notmatch '^0\.[0-9]+\.[0-9]+$') { throw 'Expected a pre-1.0 semantic version, e.g. 0.2.0' }

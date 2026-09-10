@@ -10,6 +10,7 @@ public sealed class VisionEngine : IDisposable
     private readonly Mat empty;
     private readonly Mat title;
     private readonly Mat tribute;
+    private readonly Mat deferModeIcon;
     private readonly Mat deferredMarker;
     private readonly List<Reference> references = [];
     private readonly EmbeddingModel? embedding;
@@ -89,6 +90,10 @@ public sealed class VisionEngine : IDisposable
         );
         tribute = Cv2.ImRead(
             Path.Combine(dataDirectory, "ui", "tribute-icon.png"),
+            ImreadModes.Grayscale
+        );
+        deferModeIcon = Cv2.ImRead(
+            Path.Combine(dataDirectory, "ui", "defer-mode-icon.png"),
             ImreadModes.Grayscale
         );
         if (empty.Empty())
@@ -700,7 +705,7 @@ public sealed class VisionEngine : IDisposable
         }
         int max = Math.Min(116, Math.Min(gray.Width / 12, gray.Height / 10));
         TryScale((int)Math.Round(70 * factor));
-        if (bestQuality >= 40 && best is not null && VerifyTitle(bgr, best))
+        if (bestQuality >= 40 && best is not null && VerifyRitualWindow(bgr, best))
             return best;
         if (bestQuality < 20)
             for (int cell = 16; cell <= max; cell += 2)
@@ -708,51 +713,71 @@ public sealed class VisionEngine : IDisposable
         int coarse = bestCell;
         for (int cell = Math.Max(16, coarse - 3); cell <= Math.Min(max, coarse + 3); cell++)
             TryScale(cell);
-        return best is not null && VerifyTitle(bgr, best) ? best : null;
+        return best is not null && VerifyRitualWindow(bgr, best) ? best : null;
     }
 
-    public bool VerifyTitle(Mat bgr, GridObservation grid)
+    public bool VerifyRitualWindow(Mat bgr, GridObservation grid)
     {
-        if (title.Empty())
-            return false;
         var c = grid.CellSize;
-        var region = new Box(
-            (int)(grid.Bounds.X + c * 4),
-            (int)(grid.Bounds.Y - c * 2.8),
-            (int)(c * 4),
-            (int)(c * 1.5)
-        );
-        if (!Within(region, bgr))
-            return false;
-        using var crop = new Mat(bgr, region.Rect());
-        using var gray = new Mat();
-        Cv2.CvtColor(crop, gray, ColorConversionCodes.BGR2GRAY);
-        using var reference = new Mat();
-        Cv2.Resize(title, reference, new Size(), c / 70, c / 70);
-        if (reference.Width > gray.Width || reference.Height > gray.Height)
-            return false;
-        using var scores = new Mat();
-        Cv2.MatchTemplate(gray, reference, scores, TemplateMatchModes.CCoeffNormed);
-        Cv2.MinMaxLoc(scores, out double _, out double max);
-        if (max > .60)
+        double Match(Mat template, double x, double y, double width, double height)
+        {
+            var box = new Box(
+                (int)(grid.Bounds.X + c * x),
+                (int)(grid.Bounds.Y + c * y),
+                (int)(c * width),
+                (int)(c * height)
+            );
+            if (template.Empty() || !Within(box, bgr))
+                return 0;
+            using var crop = new Mat(bgr, box.Rect());
+            using var gray = new Mat();
+            Cv2.CvtColor(crop, gray, ColorConversionCodes.BGR2GRAY);
+            using var reference = new Mat();
+            Cv2.Resize(template, reference, new Size(), c / 70, c / 70);
+            if (reference.Width > gray.Width || reference.Height > gray.Height)
+                return 0;
+            using var scores = new Mat();
+            Cv2.MatchTemplate(gray, reference, scores, TemplateMatchModes.CCoeffNormed);
+            Cv2.MinMaxLoc(scores, out _, out double max);
+            return max;
+        }
+        if (Match(title, 4, -2.8, 4, 1.5) > .60)
             return true;
-        var skullBox = new Box(
-            (int)(grid.Bounds.X + c * 3.8),
-            (int)(grid.Bounds.Y - c * 1.45),
-            (int)(c * 1.8),
-            (int)(c * 1.4)
-        );
-        if (tribute.Empty() || !Within(skullBox, bgr))
+        // Defer help covers the title; the centered tribute line can shift as costs change.
+        if (Match(tribute, 1.5, -1.55, 8.7, 1.5) > .73)
+            return true;
+        // If both text anchors are covered, require a control shape and grid texture together.
+        return Match(deferModeIcon, 10, -1.5, 1.3, 1.4) > .78 && VerifyGridCells(bgr, grid);
+    }
+
+    private bool VerifyGridCells(Mat bgr, GridObservation grid)
+    {
+        if (!Within(grid.Bounds, bgr))
             return false;
-        using var skullCrop = new Mat(bgr, skullBox.Rect());
-        using var skullGray = new Mat();
-        Cv2.CvtColor(skullCrop, skullGray, ColorConversionCodes.BGR2GRAY);
-        using var skullTemplate = new Mat();
-        Cv2.Resize(tribute, skullTemplate, new Size(), c / 70, c / 70);
-        using var skullScores = new Mat();
-        Cv2.MatchTemplate(skullGray, skullTemplate, skullScores, TemplateMatchModes.CCoeffNormed);
-        Cv2.MinMaxLoc(skullScores, out double _, out double skullMax);
-        return skullMax > .73;
+        using var gray = new Mat();
+        Cv2.CvtColor(bgr, gray, ColorConversionCodes.BGR2GRAY);
+        using var reference = new Mat();
+        Cv2.Resize(empty, reference, new Size(), grid.CellSize / 70, grid.CellSize / 70);
+        int matches = 0;
+        var rows = new HashSet<int>();
+        foreach (int y in new[] { 0, 3, 6, 9 })
+        foreach (int x in new[] { 2, 5, 8, 11 })
+        {
+            using var cell = new Mat(gray, CellBox(grid, x, y, 1, 1).Rect());
+            if (cell.Width < reference.Width || cell.Height < reference.Height)
+                continue;
+            using var scores = new Mat();
+            Cv2.MatchTemplate(cell, reference, scores, TemplateMatchModes.CCoeffNormed);
+            Cv2.MinMaxLoc(scores, out _, out double max);
+            if (max > .76)
+            {
+                matches++;
+                rows.Add(y);
+                if (matches >= 6 && rows.Count >= 2)
+                    return true;
+            }
+        }
+        return false;
     }
 
     public static bool IsDeferMode(Mat bgr, GridObservation grid)
@@ -1133,6 +1158,7 @@ public sealed class VisionEngine : IDisposable
         empty.Dispose();
         title.Dispose();
         tribute.Dispose();
+        deferModeIcon.Dispose();
         deferredMarker.Dispose();
     }
 }

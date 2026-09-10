@@ -51,6 +51,7 @@ public sealed class MainWindow : Window
     private readonly ComboBox leagues = new() { MinWidth = 190 };
     private bool loadingLeagues;
     private readonly FocusRecovery focusRecovery = new();
+    private readonly RitualPresence ritualPresence = new();
     private readonly ComboBox correction = new()
     {
         IsEditable = true,
@@ -685,6 +686,7 @@ public sealed class MainWindow : Window
         priceStates.Clear();
         tooltips.Clear();
         focusRecovery.FrameValidated();
+        ritualPresence.Reset();
         rate = null;
         lastReadTooltip = null;
         activeTooltip = null;
@@ -748,6 +750,7 @@ public sealed class MainWindow : Window
                 frame = captured.Clone();
                 analysis = result;
                 focusRecovery.FrameValidated();
+                ritualPresence.Reset();
                 selectedInstance = null;
                 bindingCorrection = true;
                 correction.SelectedItem = null;
@@ -1111,18 +1114,40 @@ public sealed class MainWindow : Window
                 return;
             }
             var grid = analysis.Grid;
-            if (!vision!.VerifyTitle(current.Image, grid))
+            bool visible = vision!.VerifyRitualWindow(current.Image, grid);
+            bool closed = ritualPresence.Observe(visible);
+            if (!visible)
             {
-                Invalidate();
-                analysis = null;
-                labels.Labels = [];
-                labels.InvalidateVisual();
-                SetStatus("의식 창 닫힘 · 분석과 화면 캡처 종료");
+                overlay.Hide();
+                var diagnostic = analysis with
+                {
+                    Fingerprint = "",
+                    Grid = closed ? null : grid,
+                    Items = [],
+                    TooltipBounds = null,
+                    Warnings =
+                    [
+                        closed ? "의식 창 닫힘 확인" : "창 감지 불확실 · 다음 프레임에서 재확인",
+                    ],
+                };
+                if (closed)
+                {
+                    Invalidate();
+                    analysis = null;
+                    rows.Clear();
+                    labels.Labels = [];
+                    labels.InvalidateVisual();
+                    SetStatus("의식 창 닫힘 · 분석과 화면 캡처 종료");
+                }
+                await SaveCapture(current.Image, diagnostic);
                 return;
             }
             var tooltip = VisionEngine.DetectTooltip(current.Image, grid);
             var changed = VisionEngine.SceneDifference(frame, current.Image, grid);
-            if (changed > .025 && tooltip is null)
+            if (
+                VisionEngine.IsDeferMode(current.Image, grid) != analysis.DeferMode
+                || changed > .025 && tooltip is null
+            )
             {
                 overlay.Hide();
                 await Reanalyze(current.Image, current.ColorStatus);

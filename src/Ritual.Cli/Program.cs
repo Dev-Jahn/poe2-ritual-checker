@@ -5,7 +5,7 @@ using Ritual.Core;
 if (args.Length == 0)
 {
     Console.WriteLine(
-        "Ritual.Cli analyze <png-or-directory> --data <data> --out <directory> [--ocr]\nRitual.Cli leagues\nRitual.Cli price <catalog-id> <league> --data <data>"
+        "Ritual.Cli analyze <png-or-directory> --data <data> --out <directory> [--ocr]\nRitual.Cli window-state <directory> --data <data> --out <json>\nRitual.Cli leagues\nRitual.Cli price <catalog-id> <league> --data <data>"
     );
     return;
 }
@@ -83,6 +83,34 @@ if (args[0] == "leagues")
     return;
 }
 var data = Path.GetFullPath(Option("--data", "data"));
+if (args[0] == "window-state")
+{
+    using var detector = new VisionEngine(data);
+    GridObservation? previous = null;
+    var results = new List<object>();
+    foreach (var path in Directory.GetFiles(args[1], "*.png", SearchOption.AllDirectories).Order())
+    {
+        using var pixels = Cv2.ImRead(path);
+        var detected = detector.DetectGrid(pixels);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var visible = previous is not null && detector.VerifyRitualWindow(pixels, previous);
+        var elapsed = watch.Elapsed.TotalMilliseconds;
+        results.Add(
+            new
+            {
+                file = Path.GetFileName(path),
+                detected,
+                trackedVisible = previous is null ? detected is not null : visible,
+                deferMode = detected is not null && VisionEngine.IsDeferMode(pixels, detected),
+                checkMs = elapsed,
+            }
+        );
+        previous = detected ?? previous;
+    }
+    JsonFiles.Write(Option("--out", "work/window-state.json"), results);
+    Console.WriteLine($"Checked {results.Count} frames");
+    return;
+}
 if (args[0] == "price")
 {
     var catalog = JsonFiles.Read<Catalog>(Path.Combine(data, "catalog.json"));

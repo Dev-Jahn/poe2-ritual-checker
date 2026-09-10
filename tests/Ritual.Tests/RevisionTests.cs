@@ -30,9 +30,9 @@ public class RevisionTests
         )
             title.CopyTo(area);
         var grid = new GridObservation(new Box(100, 250, 840, 700), 70, 1);
-        Assert.True(vision.VerifyTitle(image, grid));
+        Assert.True(vision.VerifyRitualWindow(image, grid));
         image.SetTo(OpenCvSharp.Scalar.All(0));
-        Assert.False(vision.VerifyTitle(image, grid));
+        Assert.False(vision.VerifyRitualWindow(image, grid));
     }
 
     [Fact]
