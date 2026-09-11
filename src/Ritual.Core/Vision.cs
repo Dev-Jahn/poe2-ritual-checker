@@ -1193,6 +1193,7 @@ public sealed class VisionEngine : IDisposable
                 && r.Height < grid.CellSize * 1.8
                 && r.Y > grid.Bounds.Y - grid.CellSize
                 && r.Y < grid.Bounds.Bottom
+                && HasTooltipHeader(bgr, r, grid.CellSize)
             )
             .OrderByDescending(r => r.Width)
             .ToArray();
@@ -1213,6 +1214,51 @@ public sealed class VisionEngine : IDisposable
                 grid.CellSize
             )
         );
+    }
+
+    private static bool HasTooltipHeader(Mat image, Rect candidate, double cell)
+    {
+        // Adjacent item borders and artwork can merge into one orange contour.
+        // A tooltip also needs a wide, closed title frame with a dark interior.
+        int padding = (int)(cell * .25);
+        int left = Math.Max(0, candidate.X - padding);
+        int top = Math.Max(0, candidate.Y - padding);
+        var region = new Rect(
+            left,
+            top,
+            Math.Min(image.Width, candidate.Right + padding) - left,
+            Math.Min(image.Height, candidate.Bottom + padding) - top
+        );
+        using var crop = new Mat(image, region);
+        using var gray = new Mat();
+        Cv2.CvtColor(crop, gray, ColorConversionCodes.BGR2GRAY);
+        using var edges = new Mat();
+        Cv2.Canny(gray, edges, 35, 90);
+        Cv2.FindContours(
+            edges,
+            out Point[][] contours,
+            out _,
+            RetrievalModes.List,
+            ContourApproximationModes.ApproxSimple
+        );
+        foreach (var contour in contours)
+        {
+            var box = Cv2.BoundingRect(contour);
+            if (
+                box.Width < candidate.Width * .75
+                || box.Height < cell * .25
+                || box.Height > cell * 2
+                || box.Width <= box.Height * 3
+                || Math.Abs(Cv2.ContourArea(contour)) <= box.Width * box.Height * .8
+            )
+                continue;
+            using var interior = new Mat(gray, box);
+            using var dark = new Mat();
+            Cv2.InRange(interior, Scalar.All(0), Scalar.All(55), dark);
+            if (Cv2.CountNonZero(dark) >= box.Width * box.Height * .75)
+                return true;
+        }
+        return false;
     }
 
     private static Box? DetectMouseTooltipAboveItem(Mat image, GridObservation grid)
