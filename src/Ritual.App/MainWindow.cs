@@ -730,7 +730,12 @@ public sealed class MainWindow : Window
         }
     }
 
-    private async Task AnalyzeFrame(Mat captured, string? captureStatus)
+    private async Task AnalyzeFrame(
+        Mat captured,
+        string? captureStatus,
+        GridObservation? knownGrid = null,
+        bool preservePrices = false
+    )
     {
         var generation = generations.Current;
         var token = cancellation.Token;
@@ -741,11 +746,15 @@ public sealed class MainWindow : Window
             {
                 SetStatus("의식 창과 아이템 분석 중…");
                 var watch = Stopwatch.StartNew();
-                var result = await Task.Run(() => vision!.Analyze(captured, generation), token);
+                var result = await Task.Run(
+                    () => vision!.Analyze(captured, generation, knownGrid),
+                    token
+                );
                 if (ocr.Available)
                     result = await ocr.ReadQuantitiesAsync(captured, result, token);
                 if (!generations.Accept(generation) || closing)
                     return;
+                bool reusePrices = preservePrices && AnalysisContinuity.SameItems(analysis, result);
                 frame?.Dispose();
                 frame = captured.Clone();
                 analysis = result;
@@ -756,9 +765,19 @@ public sealed class MainWindow : Window
                 correction.SelectedItem = null;
                 correction.Text = "";
                 bindingCorrection = false;
-                quotes.Clear();
+                if (!reusePrices)
+                {
+                    quotes.Clear();
+                    tooltips.Clear();
+                }
+                else
+                    foreach (var key in tooltips.Keys.ToArray())
+                        tooltips[key] = tooltips[key] with
+                        {
+                            PurchaseTribute = null,
+                            DeferTribute = null,
+                        };
                 priceStates.Clear();
-                tooltips.Clear();
                 DisplayFrame();
                 ApplyCachedPrices(generation, token);
                 SetStatus(
@@ -1149,16 +1168,8 @@ public sealed class MainWindow : Window
                 return;
             }
             var tooltip = VisionEngine.DetectTooltip(current.Image, grid);
-            var changed = VisionEngine.SceneDifference(frame, current.Image, grid);
-            if (
-                vision.IsDeferMode(current.Image, grid) != analysis.DeferMode
-                || changed > .025 && tooltip is null
-            )
-            {
-                overlay.Hide();
-                await Reanalyze(current.Image, current.ColorStatus);
+            if (await RefreshChangedScene(current.Image, current.ColorStatus, tooltip))
                 return;
-            }
             analysis = analysis with { TooltipBounds = tooltip };
             Render();
             if (tooltip is null)
@@ -1226,6 +1237,23 @@ public sealed class MainWindow : Window
         {
             watchBusy = false;
         }
+    }
+
+    private async Task<bool> RefreshChangedScene(Mat current, string colorStatus, Box? tooltip)
+    {
+        var grid = analysis!.Grid!;
+        if (vision!.IsDeferMode(current, grid) != analysis.DeferMode)
+        {
+            await Reanalyze(current, colorStatus, modeChange: true);
+            return true;
+        }
+        if (VisionEngine.SceneDifference(frame!, current, grid) > .025 && tooltip is null)
+        {
+            overlay.Hide();
+            await Reanalyze(current, colorStatus);
+            return true;
+        }
+        return false;
     }
 
     private string TooltipDetails(TooltipInfo info)
@@ -1333,20 +1361,28 @@ public sealed class MainWindow : Window
             ApplyCachedPrices(generations.Current, cancellation.Token);
     }
 
-    private async Task Reanalyze(Mat current, string colorStatus)
+    private async Task Reanalyze(Mat current, string colorStatus, bool modeChange = false)
     {
-        // A returned focus or changed screen starts a new generation before any price can render.
+        // Mode changes keep the last rendered prices until the replacement is ready.
+        // The caller has verified the Ritual window at this grid before reusing its position.
+        var knownGrid = modeChange ? analysis?.Grid : null;
         generations.Next();
         cancellation.Cancel();
         cancellation.Dispose();
         cancellation = new();
-        quotes.Clear();
+        if (!modeChange)
+        {
+            quotes.Clear();
+            tooltips.Clear();
+        }
         priceStates.Clear();
-        tooltips.Clear();
         lastReadTooltip = null;
         activeTooltip = null;
         tooltipPixels = null;
-        await AnalyzeFrame(current.Clone(), colorStatus);
+        previousTooltip = null;
+        tooltipStableFrames = 0;
+        details.Text = "";
+        await AnalyzeFrame(current.Clone(), colorStatus, knownGrid, preservePrices: modeChange);
         if (analysis?.Grid is null)
         {
             watching = false;

@@ -2,11 +2,11 @@
 
 한국어 의식 보상을 인식하고 아이템별 묶음 시세를 표시하는 Windows 앱입니다. CPU 기반 로컬 영상 인식과 Windows OCR을 사용하며, 컨트롤러와 키보드/마우스 UI의 개발 캡처로 검증합니다.
 
-**현재 버전: 0.3.2 — 개발 프리릴리스.** 제공된 개발 캡처의 회귀 검사는 통과했으나 전체 아이템·HDR·모든 화면 환경의 정확도가 입증된 제품은 아닙니다.
+**현재 버전: 0.3.3 — 개발 프리릴리스.** 제공된 개발 캡처의 회귀 검사는 통과했으나 전체 아이템·HDR·모든 화면 환경의 정확도가 입증된 제품은 아닙니다.
 
 ## 다운로드 및 실행
 
-[GitHub Releases](https://github.com/Dev-Jahn/poe2-ritual-checker/releases)에서 `RitualChecker-0.3.2-win-x64.exe` 하나를 내려받아 쓰기 가능한 폴더에서 실행하세요. DLL 폴더나 별도 .NET 설치는 필요 없습니다.
+[GitHub Releases](https://github.com/Dev-Jahn/poe2-ritual-checker/releases)에서 `RitualChecker-0.3.3-win-x64.exe` 하나를 내려받아 쓰기 가능한 폴더에서 실행하세요. DLL 폴더나 별도 .NET 설치는 필요 없습니다.
 
 - Windows 10 2004 이상 또는 Windows 11, x64.
 - 한국어 툴팁 판독에는 Windows 한국어 OCR 언어 기능이 필요합니다.
@@ -17,9 +17,9 @@
 실행 파일은 현재 Authenticode 서명되지 않았습니다. 게시된 SHA-256과 빌드 출처 증명을 확인할 수 있으며, 이는 Windows 코드 서명을 대체하지 않습니다.
 
 ```powershell
-Get-FileHash ./RitualChecker-0.3.2-win-x64.exe -Algorithm SHA256
+Get-FileHash ./RitualChecker-0.3.3-win-x64.exe -Algorithm SHA256
 # GitHub CLI가 설치되어 있으면 빌드 출처 확인:
-gh attestation verify ./RitualChecker-0.3.2-win-x64.exe --repo Dev-Jahn/poe2-ritual-checker
+gh attestation verify ./RitualChecker-0.3.3-win-x64.exe --repo Dev-Jahn/poe2-ritual-checker
 ```
 
 ## 기능
@@ -59,10 +59,10 @@ Windows, .NET 8 SDK, Python 3.13을 준비합니다. 공개 저장소에 고정�
 python -m pip install -r tools/requirements.txt
 ./build.ps1
 python -m pytest tests/test_tools.py -q
-./build.ps1 -Publish -Version 0.3.2
+./build.ps1 -Publish -Version 0.3.3
 ```
 
-결과: `artifacts/0.3.2/RitualChecker-0.3.2-win-x64.exe`와 `SHA256SUMS.txt`.
+결과: `artifacts/0.3.3/RitualChecker-0.3.3-win-x64.exe`와 `SHA256SUMS.txt`.
 WPF 호환성을 위해 trimming은 사용하지 않습니다. 게시 단계는 단일 EXE 외 파일이 생기면 실패합니다.
 
 참조 갱신은 `python tools/update_catalog.py --out data`로 수행합니다. 원격 이미지·옵션 변경은 인식 결과에 영향을 주므로 변경 자료는 다시 검증해야 합니다. 게임 이미지와 정보의 권리는 [별도 출처 안내](THIRD_PARTY_NOTICES.md)를 확인하세요.
