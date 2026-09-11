@@ -25,7 +25,14 @@ public sealed class VisionEngine : IDisposable
         float[] Color,
         float[]? Embedding,
         bool Manual = false
-    );
+    )
+    {
+        // A controller chevron and its glow cover the bottom of one-cell icons.
+        public float[] ControllerMask { get; } =
+            Item.Width == 1 && Item.Height == 1
+                ? Mask.Select((weight, index) => index / 24 >= 40 ? 0 : weight).ToArray()
+                : Mask;
+    }
 
     private sealed record Proposal(
         int X,
@@ -445,11 +452,12 @@ public sealed class VisionEngine : IDisposable
                 var (g, e) = Describe(roi);
                 var color = ColorPixels(roi);
                 var embedded = embedding?.Project(g);
+                bool controllerSelected = w == 1 && h == 1 && ControllerSelected(bgr, box, c);
                 var candidates = group
                     .Select(r => new Candidate(
                         r.Item.Id,
                         DisplayName(r.Item),
-                        Score(r, g, e, color, embedded)
+                        Score(r, g, e, color, embedded, controllerSelected)
                     ))
                     .GroupBy(r => r.Id)
                     .Select(g => g.MaxBy(r => r.Score)!)
@@ -575,12 +583,14 @@ public sealed class VisionEngine : IDisposable
         float[] gray,
         float[] edge,
         float[] color,
-        float[]? vector
+        float[]? vector,
+        bool controllerSelected
     )
     {
+        var mask = controllerSelected ? reference.ControllerMask : reference.Mask;
         var template =
-            .70 * Correlation(gray, reference.Gray, reference.Mask)
-            + .30 * Correlation(edge, reference.Edge, reference.Mask);
+            .70 * Correlation(gray, reference.Gray, mask)
+            + .30 * Correlation(edge, reference.Edge, mask);
         var learned = vector is not null
             ? EmbeddingModel.Similarity(vector, reference.Embedding!)
             : 0;
@@ -589,7 +599,7 @@ public sealed class VisionEngine : IDisposable
                 method == "template" ? template
                 : method == "embedding" ? learned
                 : .65 * template + .35 * learned
-            ) - ColorPenalty(color, reference.Color, reference.Mask);
+            ) - ColorPenalty(color, reference.Color, mask);
         return reference.Manual && score < .70 ? -1 : score;
     }
 
@@ -1031,10 +1041,11 @@ public sealed class VisionEngine : IDisposable
         return Cv2.Mean(diff).Val0 / 255;
     }
 
-    public static bool Selected(Mat image, Box box, double cell)
+    public static bool Selected(Mat image, Box box, double cell) =>
+        MouseHovered(image, box, cell) || ControllerSelected(image, box, cell);
+
+    private static bool ControllerSelected(Mat image, Box box, double cell)
     {
-        if (MouseHovered(image, box, cell))
-            return true;
         // The selected slot has an upward chevron. A deferred item's flat gold
         // border is not selection and must not attach another item's tooltip.
         int cx = box.X + box.Width / 2;
