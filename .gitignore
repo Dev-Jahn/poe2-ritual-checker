@@ -25,6 +25,8 @@ captures/
 !/data/catalog.json
 !/data/catalog-mod-corrections.json
 !/data/embedding.json
+!/data/recognition-model.json
+!/data/ritual-pool.json
 !/data/official-references.json
 !/data/images/
 !/data/official-images/
@@ -37,6 +39,7 @@ captures/
 **/settings.json
 **/price-cache/
 **/market-observations/
+**/recognition-reports/
 
 /docs/REVISION-r*.md
 .ruff_cache/

@@ -147,8 +147,10 @@ if (args[0] != "analyze")
 using var vision = new VisionEngine(
     data,
     Option("--method", "template"),
-    !args.Contains("--no-user-examples")
+    !args.Contains("--no-user-examples"),
+    !args.Contains("--no-learned")
 );
+vision.League = Option("--league", "");
 var ocr = new TextReaderEngine();
 var output = Path.GetFullPath(Option("--out", "work/analysis"));
 Directory.CreateDirectory(output);
@@ -157,13 +159,54 @@ ocr.SingleQuantityItems.UnionWith(
 );
 ocr.LoadDigitReference(Path.Combine(data, "ui", "quantity-one.png"));
 var paths = Directory.Exists(args[1]) ? Directory.GetFiles(args[1], "*.png") : new[] { args[1] };
+if (Path.GetExtension(args[1]).Equals(".json", StringComparison.OrdinalIgnoreCase))
+{
+    using var manifest = JsonDocument.Parse(File.ReadAllText(args[1]));
+    string split = Option("--split", "all");
+    paths = manifest
+        .RootElement.GetProperty("records")
+        .EnumerateArray()
+        .Where(r => split == "all" || r.GetProperty("split").GetString() == split)
+        .Select(r => r.GetProperty("file").GetString()!)
+        .Distinct()
+        .Order()
+        .ToArray();
+}
 var summary = new List<object>();
+Mat? previousFrame = null;
+Analysis? previousAnalysis = null;
+string? previousDirectory = null;
 foreach (var path in paths)
 {
     using var frame = Cv2.ImRead(path);
     if (frame.Empty())
         throw new InvalidDataException(path);
     var result = vision.Analyze(frame, 1);
+    if (args.Contains("--temporal"))
+    {
+        if (
+            previousFrame is not null
+            && previousAnalysis is not null
+            && previousDirectory == Path.GetDirectoryName(path)
+        )
+        {
+            var reconciled = RecognitionContinuity.Reconcile(
+                previousFrame,
+                previousAnalysis,
+                frame,
+                result
+            );
+            JsonFiles.Write(
+                Path.Combine(output, Path.GetFileNameWithoutExtension(path) + ".continuity.json"),
+                new { raw = result, reconciled.Conflicts }
+            );
+            result = reconciled.Analysis;
+        }
+        previousFrame?.Dispose();
+        previousFrame = frame.Clone();
+        previousAnalysis = result;
+        previousDirectory = Path.GetDirectoryName(path);
+    }
     if (args.Contains("--ocr") && ocr.Available)
         result = await ocr.ReadQuantitiesAsync(frame, result, default);
     if (args.Contains("--ocr") && ocr.Available && result.TooltipBounds is { } tb)
@@ -184,23 +227,26 @@ foreach (var path in paths)
         );
     }
     JsonFiles.Write(Path.Combine(output, Path.GetFileNameWithoutExtension(path) + ".json"), result);
-    if (result.Grid is { } grid)
-        Cv2.Rectangle(frame, grid.Bounds.Rect(), new Scalar(30, 220, 30), 2);
-    for (int i = 0; i < result.Items.Length; i++)
+    if (!args.Contains("--no-images"))
     {
-        var item = result.Items[i];
-        Cv2.Rectangle(frame, item.Bounds.Rect(), new Scalar(10, 160, 255), 1);
-        Cv2.PutText(
-            frame,
-            $"{i}:{item.CatalogId} {item.Confidence:0.00}",
-            new Point(item.Bounds.X + 2, item.Bounds.Y + 15),
-            HersheyFonts.HersheySimplex,
-            .28,
-            Scalar.White,
-            1
-        );
+        if (result.Grid is { } grid)
+            Cv2.Rectangle(frame, grid.Bounds.Rect(), new Scalar(30, 220, 30), 2);
+        for (int i = 0; i < result.Items.Length; i++)
+        {
+            var item = result.Items[i];
+            Cv2.Rectangle(frame, item.Bounds.Rect(), new Scalar(10, 160, 255), 1);
+            Cv2.PutText(
+                frame,
+                $"{i}:{item.CatalogId} {item.Confidence:0.00}",
+                new Point(item.Bounds.X + 2, item.Bounds.Y + 15),
+                HersheyFonts.HersheySimplex,
+                .28,
+                Scalar.White,
+                1
+            );
+        }
+        Cv2.ImWrite(Path.Combine(output, Path.GetFileName(path)), frame);
     }
-    Cv2.ImWrite(Path.Combine(output, Path.GetFileName(path)), frame);
     summary.Add(
         new
         {
@@ -214,4 +260,5 @@ foreach (var path in paths)
         $"{Path.GetFileName(path)}: {result.Items.Length} items / {result.ElapsedMs:0}ms / grid={result.Grid?.Bounds}"
     );
 }
+previousFrame?.Dispose();
 JsonFiles.Write(Path.Combine(output, "summary.json"), summary);

@@ -16,6 +16,8 @@ public sealed class VisionEngine : IDisposable
     private readonly List<Reference> references = [];
     private readonly EmbeddingModel? embedding;
     private readonly string method;
+    private readonly RecognitionPool pool;
+    public string? League { get; set; }
 
     private sealed record Reference(
         CatalogItem Item,
@@ -24,7 +26,9 @@ public sealed class VisionEngine : IDisposable
         float[] Mask,
         float[] Color,
         float[]? Embedding,
-        bool Manual = false
+        bool Manual = false,
+        double MinimumScore = .70,
+        bool Trained = false
     )
     {
         // A controller chevron and its glow cover the bottom of one-cell icons.
@@ -47,16 +51,33 @@ public sealed class VisionEngine : IDisposable
 
     private sealed record OfficialManifest(OfficialArt[] Items);
 
+    private sealed record AppearancePrototype(
+        string CatalogId,
+        int Columns,
+        int Rows,
+        float[] Gray,
+        float[] Edge,
+        float[] Color
+    );
+
+    private sealed record AppearanceModel(
+        int SchemaVersion,
+        string CatalogVersion,
+        AppearancePrototype[] Prototypes
+    );
+
     public Catalog Catalog => catalog;
 
     public VisionEngine(
         string dataDirectory,
         string method = "template",
-        bool useUserExamples = true
+        bool useUserExamples = true,
+        bool useLearnedReferences = true
     )
     {
         Cv2.SetNumThreads(Math.Min(4, Environment.ProcessorCount));
         catalog = JsonFiles.Read<Catalog>(Path.Combine(dataDirectory, "catalog.json"));
+        pool = new(Path.Combine(dataDirectory, "ritual-pool.json"));
         if (method is not ("template" or "embedding" or "hybrid"))
             throw new ArgumentException("Unknown recognition method");
         this.method = method;
@@ -305,6 +326,39 @@ public sealed class VisionEngine : IDisposable
                 }
             }
         }
+        var modelPath = Path.Combine(dataDirectory, "recognition-model.json");
+        if (useLearnedReferences && File.Exists(modelPath))
+        {
+            var model = JsonFiles.Read<AppearanceModel>(modelPath);
+            if (model.SchemaVersion != 1 || model.CatalogVersion != catalog.Version)
+                throw new InvalidDataException("실물 인식 자료와 카탈로그 버전 불일치");
+            foreach (var p in model.Prototypes)
+            {
+                var item = catalog.Items.Single(i => i.Id == p.CatalogId);
+                if (
+                    p.Gray.Length != 1152
+                    || p.Edge.Length != 1152
+                    || p.Color.Length != 3456
+                    || p.Columns is < 1 or > 2
+                    || p.Rows is < 1 or > 4
+                )
+                    throw new InvalidDataException("실물 인식 자료 형식 오류");
+                item = item with { Width = p.Columns, Height = p.Rows };
+                references.Add(
+                    new(
+                        item,
+                        p.Gray,
+                        p.Edge,
+                        ExampleMask(item),
+                        p.Color,
+                        embedding?.Project(p.Gray),
+                        true,
+                        .82,
+                        true
+                    )
+                );
+            }
+        }
         var examples = Path.Combine(dataDirectory, "user-examples");
         if (useUserExamples && Directory.Exists(examples))
             foreach (var path in Directory.GetFiles(examples, "*.json"))
@@ -354,13 +408,19 @@ public sealed class VisionEngine : IDisposable
     private void AddExampleReference(Mat crop, CatalogItem item)
     {
         var (g, e) = Describe(crop);
+        var mask = ExampleMask(item);
+        lock (references)
+            references.Add(new(item, g, e, mask, ColorPixels(crop), embedding?.Project(g), true));
+    }
+
+    private static float[] ExampleMask(CatalogItem item)
+    {
         var mask = new float[1152];
         for (int y = 3; y < 45; y++)
         for (int x = 2; x < 22; x++)
             if (!(item.Width == 1 && item.Height == 1 && ((x < 8 && y < 15) || (x > 15 && y > 31))))
                 mask[y * 24 + x] = 1;
-        lock (references)
-            references.Add(new(item, g, e, mask, ColorPixels(crop), embedding?.Project(g), true));
+        return mask;
     }
 
     public Analysis Analyze(Mat bgr, long generation, GridObservation? knownGrid = null)
@@ -426,10 +486,24 @@ public sealed class VisionEngine : IDisposable
             occupied[y, x] = blue / n > .14 || red / n > .14 || bright / n > .08;
         }
         var proposals = new List<Proposal>();
+        var cursorCells = new List<Box>();
+        for (int y = 0; y < 10; y++)
+        for (int x = 0; x < 12; x++)
+        {
+            var box = CellBox(grid, x, y, 1, 1);
+            if (occupied[y, x] && ControllerSelected(bgr, box, c))
+                cursorCells.Add(box);
+        }
+        // Animated focus is not necessarily aligned to a cell in a captured frame.
+        var cursorMasks = cursorCells.Concat(ControllerCursor.Detect(bgr, grid)).ToList();
         Reference[] snapshot;
         lock (references)
             snapshot = references.ToArray();
-        var groups = snapshot.GroupBy(r => (r.Item.Width, r.Item.Height)).ToArray();
+        var excluded = pool.Excluded(League);
+        var groups = snapshot
+            .Where(r => !excluded.Contains(r.Item.Id))
+            .GroupBy(r => (r.Item.Width, r.Item.Height))
+            .ToArray();
         for (int y = 0; y < 10; y++)
         for (int x = 0; x < 12; x++)
         {
@@ -453,11 +527,33 @@ public sealed class VisionEngine : IDisposable
                 var color = ColorPixels(roi);
                 var embedded = embedding?.Project(g);
                 bool controllerSelected = w == 1 && h == 1 && ControllerSelected(bgr, box, c);
-                var candidates = group
+                var occlusion = CursorMask(box, cursorMasks, c);
+                var scored = group
+                    .Select(r =>
+                        (
+                            Reference: r,
+                            Score: Score(r, g, e, color, embedded, controllerSelected, occlusion)
+                        )
+                    )
+                    .ToArray();
+                var learned = scored
+                    .Where(r => r.Reference.Trained)
+                    .GroupBy(r => r.Reference.Item.Id)
+                    .Select(g => g.Max(r => r.Score))
+                    .OrderByDescending(s => s)
+                    .Take(2)
+                    .ToArray();
+                // Similar real prototypes are not independent evidence for a new winner.
+                bool learnedReliable =
+                    learned.Length > 0
+                    && learned[0] >= .82
+                    && (learned.Length == 1 || learned[0] - learned[1] >= .04);
+                var candidates = scored
+                    .Where(r => !r.Reference.Trained || learnedReliable)
                     .Select(r => new Candidate(
-                        r.Item.Id,
-                        DisplayName(r.Item),
-                        Score(r, g, e, color, embedded, controllerSelected)
+                        r.Reference.Item.Id,
+                        DisplayName(r.Reference.Item),
+                        r.Score
                     ))
                     .GroupBy(r => r.Id)
                     .Select(g => g.MaxBy(r => r.Score)!)
@@ -470,15 +566,14 @@ public sealed class VisionEngine : IDisposable
         }
         var used = new bool[10, 12];
         var items = new List<ItemObservation>();
-        foreach (var p in proposals.OrderByDescending(p => p.Score))
+        var partition = RegionPartitioner.Select(
+            proposals.Select((p, i) => new RegionCandidate(p.X, p.Y, p.W, p.H, p.Score, i)),
+            12,
+            10
+        );
+        foreach (var index in partition)
         {
-            bool overlaps = false;
-            for (int dy = 0; dy < p.H; dy++)
-            for (int dx = 0; dx < p.W; dx++)
-                if (used[p.Y + dy, p.X + dx])
-                    overlaps = true;
-            if (overlaps)
-                continue;
+            var p = proposals[index];
             for (int dy = 0; dy < p.H; dy++)
             for (int dx = 0; dx < p.W; dx++)
                 used[p.Y + dy, p.X + dx] = true;
@@ -488,7 +583,11 @@ public sealed class VisionEngine : IDisposable
             using var hsv = new Mat();
             Cv2.CvtColor(crop, hsv, ColorConversionCodes.BGR2HSV);
             var mean = Cv2.Mean(hsv);
-            bool selected = Selected(bgr, box, c);
+            bool selected =
+                Selected(bgr, box, c)
+                || cursorCells.Any(b =>
+                    b.X >= box.X && b.Right <= box.Right && b.Y >= box.Y && b.Bottom <= box.Bottom
+                );
             // Score is similarity, not a calibrated probability.
             var margin = p.Candidates.Length > 1 ? p.Score - p.Candidates[1].Score : 1;
             items.Add(
@@ -584,13 +683,14 @@ public sealed class VisionEngine : IDisposable
         float[] edge,
         float[] color,
         float[]? vector,
-        bool controllerSelected
+        bool controllerSelected,
+        float[]? occlusion
     )
     {
         var mask = controllerSelected ? reference.ControllerMask : reference.Mask;
         var template =
-            .70 * Correlation(gray, reference.Gray, mask)
-            + .30 * Correlation(edge, reference.Edge, mask);
+            .70 * Correlation(gray, reference.Gray, mask, occlusion)
+            + .30 * Correlation(edge, reference.Edge, mask, occlusion);
         var learned = vector is not null
             ? EmbeddingModel.Similarity(vector, reference.Embedding!)
             : 0;
@@ -599,8 +699,41 @@ public sealed class VisionEngine : IDisposable
                 method == "template" ? template
                 : method == "embedding" ? learned
                 : .65 * template + .35 * learned
-            ) - ColorPenalty(color, reference.Color, mask);
-        return reference.Manual && score < .70 ? -1 : score;
+            ) - ColorPenalty(color, reference.Color, mask, occlusion);
+        return reference.Manual && score < reference.MinimumScore ? -1 : score;
+    }
+
+    private static float[]? CursorMask(Box region, List<Box> cursorCells, double cell)
+    {
+        var overlapping = cursorCells.Where(b => b.Intersects(region)).ToArray();
+        if (overlapping.Length == 0)
+            return null;
+        var mask = Enumerable.Repeat(1f, 1152).ToArray();
+        for (int y = 0; y < 48; y++)
+        for (int x = 0; x < 24; x++)
+        {
+            double px = region.X + (x + .5) * region.Width / 24;
+            double py = region.Y + (y + .5) * region.Height / 48;
+            // Controller focus can end at an internal cell edge of a tall item.
+            if (
+                overlapping.Any(b =>
+                    px >= b.X - cell * .04
+                    && px <= b.Right + cell * .04
+                    && (
+                        (py >= b.Bottom - cell * .20 && py <= b.Bottom + cell * .06)
+                        || Math.Abs(py - b.Y) <= cell * .04
+                        || py >= b.Y
+                            && py <= b.Bottom
+                            && (
+                                Math.Abs(px - b.X) <= cell * .04
+                                || Math.Abs(px - b.Right) <= cell * .04
+                            )
+                    )
+                )
+            )
+                mask[y * 24 + x] = 0;
+        }
+        return mask;
     }
 
     private static IEnumerable<(Point p, double s)[]> ConnectedCells(
@@ -756,10 +889,9 @@ public sealed class VisionEngine : IDisposable
                     if (!Within(box, bgr))
                         continue;
                     double quality = component.Length * component.Average(p => p.s);
-                    var candidate = new GridObservation(
-                        box,
-                        spacing / factor,
-                        component.Average(p => p.s)
+                    var candidate = AnchorGrid(
+                        bgr,
+                        new GridObservation(box, spacing / factor, component.Average(p => p.s))
                     );
                     if (quality > bestQuality && VerifyRitualWindow(bgr, candidate))
                     {
@@ -791,6 +923,16 @@ public sealed class VisionEngine : IDisposable
         double y,
         double width,
         double height
+    ) => FindUi(bgr, grid, template, x, y, width, height).Score;
+
+    private static (double Score, double X, double Y) FindUi(
+        Mat bgr,
+        GridObservation grid,
+        Mat template,
+        double x,
+        double y,
+        double width,
+        double height
     )
     {
         var c = grid.CellSize;
@@ -801,18 +943,45 @@ public sealed class VisionEngine : IDisposable
             (int)(c * height)
         );
         if (template.Empty() || !Within(box, bgr))
-            return 0;
+            return default;
         using var crop = new Mat(bgr, box.Rect());
         using var gray = new Mat();
         Cv2.CvtColor(crop, gray, ColorConversionCodes.BGR2GRAY);
         using var reference = new Mat();
         Cv2.Resize(template, reference, new Size(), c / 70, c / 70);
         if (reference.Width > gray.Width || reference.Height > gray.Height)
-            return 0;
+            return default;
         using var scores = new Mat();
         Cv2.MatchTemplate(gray, reference, scores, TemplateMatchModes.CCoeffNormed);
-        Cv2.MinMaxLoc(scores, out _, out double max);
-        return max;
+        Cv2.MinMaxLoc(scores, out _, out double max, out _, out Point point);
+        return (
+            max,
+            box.X + point.X + reference.Width / 2.0,
+            box.Y + point.Y + reference.Height / 2.0
+        );
+    }
+
+    private GridObservation AnchorGrid(Mat image, GridObservation grid)
+    {
+        // Empty-cell peaks establish spacing, not the last visible column: a tooltip
+        // or confirmation panel may hide it. Header artwork anchors the lattice origin.
+        var heading = FindUi(image, grid, title, 2, -3, 8, 1.9);
+        var anchor =
+            heading.Score > .70 ? heading : FindUi(image, grid, deferModeIcon, 8.5, -1.7, 4, 1.6);
+        bool useTitle = heading.Score > .70;
+        if (!useTitle && anchor.Score < .83)
+            return grid;
+        double c = grid.CellSize;
+        int dx = (int)Math.Round((anchor.X - grid.Bounds.X) / c - (useTitle ? 6 : 10.5));
+        int dy = useTitle ? (int)Math.Round((anchor.Y - grid.Bounds.Y) / c + 2.1) : 0;
+        if (Math.Abs(dx) > 2 || Math.Abs(dy) > 2)
+            return grid;
+        var box = grid.Bounds with
+        {
+            X = grid.Bounds.X + (int)Math.Round(dx * c),
+            Y = grid.Bounds.Y + (int)Math.Round(dy * c),
+        };
+        return Within(box, image) ? grid with { Bounds = box } : grid;
     }
 
     public bool VerifyRitualWindow(Mat bgr, GridObservation grid)
@@ -926,7 +1095,7 @@ public sealed class VisionEngine : IDisposable
         return (g, e);
     }
 
-    private static double Correlation(float[] a, float[] b, float[] mask)
+    private static double Correlation(float[] a, float[] b, float[] mask, float[]? occlusion = null)
     {
         var vn = System.Numerics.Vector<float>.Zero;
         var vsa = vn;
@@ -941,6 +1110,8 @@ public sealed class VisionEngine : IDisposable
             var av = new System.Numerics.Vector<float>(a, i);
             var bv = new System.Numerics.Vector<float>(b, i);
             var m = new System.Numerics.Vector<float>(mask, i);
+            if (occlusion is not null)
+                m *= new System.Numerics.Vector<float>(occlusion, i);
             var am = av * m;
             var bm = bv * m;
             vn += m;
@@ -958,7 +1129,7 @@ public sealed class VisionEngine : IDisposable
             ab = System.Numerics.Vector.Sum(vab);
         for (; i < a.Length; i++)
         {
-            double m = mask[i];
+            double m = mask[i] * (occlusion?[i] ?? 1);
             n += m;
             sa += a[i] * m;
             sb += b[i] * m;
@@ -991,14 +1162,19 @@ public sealed class VisionEngine : IDisposable
         return values;
     }
 
-    private static double ColorPenalty(float[] a, float[] b, float[] mask)
+    private static double ColorPenalty(
+        float[] a,
+        float[] b,
+        float[] mask,
+        float[]? occlusion = null
+    )
     {
         float distance = 0,
             n = 0,
             saturation = 0;
         for (int i = 0; i < mask.Length; i++)
         {
-            if (mask[i] == 0)
+            if (mask[i] == 0 || occlusion?[i] == 0)
                 continue;
             int j = i * 3;
             if (a[j] + a[j + 1] + a[j + 2] < .5f || b[j] + b[j + 1] + b[j + 2] < .5f)

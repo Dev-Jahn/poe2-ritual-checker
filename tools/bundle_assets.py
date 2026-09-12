@@ -6,7 +6,13 @@ import zipfile
 root = Path(__file__).resolve().parents[1]
 paths = [
     root / "data" / n
-    for n in ("catalog.json", "embedding.json", "official-references.json")
+    for n in (
+        "catalog.json",
+        "embedding.json",
+        "official-references.json",
+        "recognition-model.json",
+        "ritual-pool.json",
+    )
 ]
 for folder in ("images", "official-images", "ui"):
     paths += sorted((root / "data" / folder).glob("*.png"))

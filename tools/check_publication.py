@@ -28,6 +28,8 @@ private_parts = {
     "artifacts",
     "poe2_ritual_data",
     "captures",
+    "recognition-reports",
+    "capture-dataset",
     "price-cache",
     "market-observations",
     "bin",

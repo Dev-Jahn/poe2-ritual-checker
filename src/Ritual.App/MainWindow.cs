@@ -85,6 +85,11 @@ public sealed class MainWindow : Window
         Background = new SolidColorBrush(Color.FromRgb(11, 14, 18)),
     };
     private Mat? frame;
+    private Mat? observedFrame;
+    private Analysis? rawAnalysis;
+    private RecognitionConflict[] recognitionConflicts = [];
+    private readonly HashSet<string> savedConflicts = [];
+    private bool reportBusy;
     private Analysis? analysis;
     private nint liveWindow;
     private Box? liveBounds;
@@ -183,6 +188,7 @@ public sealed class MainWindow : Window
         Closed += (_, _) =>
         {
             frame?.Dispose();
+            observedFrame?.Dispose();
         };
     }
 
@@ -262,6 +268,13 @@ public sealed class MainWindow : Window
             )
         );
         toolbar.Children.Add(Button("입력 설정", (_, _) => EditInput()));
+        var reportButton = Button(
+            "오인식 저장",
+            async (_, _) => await SaveRecognitionReport("user-reported")
+        );
+        reportButton.ToolTip =
+            "현재 원본 화면과 인식 후보를 recognition-reports 폴더에 저장합니다. 외부로 전송하지 않습니다.";
+        toolbar.Children.Add(reportButton);
         toolbar.Children.Add(
             new TextBlock { Text = "리그  ", VerticalAlignment = VerticalAlignment.Center }
         );
@@ -280,6 +293,8 @@ public sealed class MainWindow : Window
             )
                 return;
             settings.League = league;
+            if (vision is not null)
+                vision.League = league;
             StartEconomy();
             JsonFiles.Write(settingsPath, settings);
             var active = watching;
@@ -704,6 +719,9 @@ public sealed class MainWindow : Window
         Invalidate();
         liveWindow = 0;
         liveBounds = null;
+        observedFrame?.Dispose();
+        observedFrame = null;
+        savedConflicts.Clear();
         await AnalyzeFrame(Cv2.ImRead(path), null);
     }
 
@@ -734,7 +752,8 @@ public sealed class MainWindow : Window
         Mat captured,
         string? captureStatus,
         GridObservation? knownGrid = null,
-        bool preservePrices = false
+        bool preservePrices = false,
+        bool allowContinuity = false
     )
     {
         var generation = generations.Current;
@@ -746,6 +765,7 @@ public sealed class MainWindow : Window
             {
                 SetStatus("의식 창과 아이템 분석 중…");
                 var watch = Stopwatch.StartNew();
+                vision!.League = settings.League;
                 var result = await Task.Run(
                     () => vision!.Analyze(captured, generation, knownGrid),
                     token
@@ -754,6 +774,43 @@ public sealed class MainWindow : Window
                     result = await ocr.ReadQuantitiesAsync(captured, result, token);
                 if (!generations.Accept(generation) || closing)
                     return;
+                rawAnalysis = result;
+                recognitionConflicts = [];
+                if (!allowContinuity)
+                    savedConflicts.Clear();
+                if (allowContinuity && frame is not null && analysis is not null)
+                {
+                    var continuity = RecognitionContinuity.Reconcile(
+                        frame,
+                        analysis,
+                        captured,
+                        result
+                    );
+                    result = continuity.Analysis;
+                    recognitionConflicts = continuity.Conflicts;
+                    if (recognitionConflicts.Length > 0)
+                    {
+                        string key = string.Join(
+                            "|",
+                            recognitionConflicts.Select(c =>
+                                $"{c.InstanceId}:{c.PreviousId}:{c.ProposedId}:{c.Reason}"
+                            )
+                        );
+                        if (savedConflicts.Add(key))
+                        {
+                            // Copy before replacing frame/analysis; no mutable UI state is read by the writer.
+                            var context = ReportContext(
+                                "automatic-conflict",
+                                result,
+                                rawAnalysis,
+                                analysis
+                            );
+                            _ = WriteRecognitionReport(captured, context, frame);
+                        }
+                    }
+                    else if (!AnalysisContinuity.SameItems(analysis, result))
+                        savedConflicts.Clear();
+                }
                 bool reusePrices = preservePrices && AnalysisContinuity.SameItems(analysis, result);
                 frame?.Dispose();
                 frame = captured.Clone();
@@ -1065,6 +1122,8 @@ public sealed class MainWindow : Window
     {
         using var copy = original.Clone();
         var hdr = capture?.DisplayColorInfo.HdrEnabled;
+        var raw = rawAnalysis;
+        var conflicts = recognitionConflicts;
         try
         {
             await Task.Run(() =>
@@ -1093,6 +1152,9 @@ public sealed class MainWindow : Window
                         captureBackend = "Windows.Graphics.Capture/game-window",
                         sha256 = hash,
                         prediction = result,
+                        rawPrediction = raw,
+                        conflicts,
+                        appVersion = typeof(MainWindow).Assembly.GetName().Version?.ToString(),
                         tooltip,
                         groundTruth = (object?)null,
                     }
@@ -1131,6 +1193,8 @@ public sealed class MainWindow : Window
             using var current = await capture.CaptureAsync(token);
             if (!generations.Accept(gen))
                 return;
+            observedFrame?.Dispose();
+            observedFrame = current.Image.Clone();
             if (current.ScreenBounds != liveBounds || focusRecovery.RequiresValidation)
             {
                 overlay.Hide();
@@ -1329,6 +1393,10 @@ public sealed class MainWindow : Window
             return;
         }
         using var crop = new Mat(frame, target.Bounds.Rect());
+        _ = WriteRecognitionReport(
+            frame,
+            ReportContext("manual-correction", analysis, rawAnalysis, null, known.Id)
+        );
         vision.AddExample(crop, known.Id, Path.Combine(data, "user-examples"), captureSession);
         analysis = analysis with
         {
@@ -1382,7 +1450,13 @@ public sealed class MainWindow : Window
         previousTooltip = null;
         tooltipStableFrames = 0;
         details.Text = "";
-        await AnalyzeFrame(current.Clone(), colorStatus, knownGrid, preservePrices: modeChange);
+        await AnalyzeFrame(
+            current.Clone(),
+            colorStatus,
+            knownGrid,
+            preservePrices: modeChange,
+            allowContinuity: true
+        );
         if (analysis?.Grid is null)
         {
             watching = false;
@@ -1390,6 +1464,88 @@ public sealed class MainWindow : Window
             overlay.Hide();
             capture?.Dispose();
             capture = null;
+        }
+    }
+
+    private RecognitionReportContext ReportContext(
+        string reason,
+        Analysis result,
+        Analysis? raw,
+        Analysis? previous,
+        string? corrected = null
+    ) =>
+        new(
+            reason,
+            captureSession,
+            settings.League,
+            typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "unknown",
+            vision!.Catalog.Version,
+            File.Exists(Path.Combine(data, "recognition-model.json"))
+                ? Convert.ToHexString(
+                    System.Security.Cryptography.SHA256.HashData(
+                        File.ReadAllBytes(Path.Combine(data, "recognition-model.json"))
+                    )
+                )
+                : null,
+            selectedInstance,
+            corrected,
+            result,
+            raw,
+            previous,
+            recognitionConflicts,
+            new(quotes),
+            new(priceStates),
+            new(tooltips)
+        );
+
+    private async Task<string?> WriteRecognitionReport(
+        Mat pixels,
+        RecognitionReportContext context,
+        Mat? previous = null,
+        Mat? observed = null
+    )
+    {
+        try
+        {
+            return await RecognitionReport.SaveAsync(
+                Path.Combine(AppContext.BaseDirectory, "recognition-reports"),
+                pixels,
+                context,
+                previous,
+                observed
+            );
+        }
+        catch (Exception ex)
+        {
+            if (!closing)
+                SetStatus("오인식 자료 저장 실패: " + ex.Message);
+            return null;
+        }
+    }
+
+    private async Task SaveRecognitionReport(string reason)
+    {
+        if (reportBusy)
+            return;
+        if (frame is null || analysis is null || vision is null)
+        {
+            SetStatus("분석한 화면이 있어야 오인식 자료를 저장할 수 있습니다.");
+            return;
+        }
+        reportBusy = true;
+        try
+        {
+            var folder = await WriteRecognitionReport(
+                frame,
+                ReportContext(reason, analysis, rawAnalysis, null),
+                observed: observedFrame
+            );
+            if (folder is not null && !closing)
+                SetStatus("오인식 자료 저장 완료 · " + folder);
+        }
+        finally
+        {
+            reportBusy = false;
         }
     }
 

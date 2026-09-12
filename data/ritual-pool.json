@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "rules": [
+    {
+      "leagues": ["Forbidden Rites", "Hardcore Forbidden Rites", "SSF Forbidden Rites", "HC SSF Forbidden Rites"],
+      "excludedIds": ["Omen_of_Corruption"],
+      "source": "User-confirmed current-season availability, 2026-09-12",
+      "reason": "Unavailable as a new Ritual reward in this season. Absence of a market quote is not an availability rule."
+    }
+  ]
+}

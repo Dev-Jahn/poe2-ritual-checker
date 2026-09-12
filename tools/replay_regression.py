@@ -8,6 +8,10 @@ import numpy as np
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dotnet", default="work/dotnet/dotnet.exe")
+    p.add_argument(
+        "--cli",
+        default="src/Ritual.Cli/bin/Release/net8.0-windows10.0.19041.0/Ritual.Cli.dll",
+    )
     p.add_argument("--out", type=Path, default=Path("work/development-regression"))
     p.add_argument("--skip-run", action="store_true")
     args = p.parse_args()
@@ -31,10 +35,7 @@ def main():
             subprocess.run(
                 [
                     str((root / args.dotnet).resolve()),
-                    str(
-                        root
-                        / "src/Ritual.Cli/bin/Release/net8.0-windows10.0.19041.0/Ritual.Cli.dll"
-                    ),
+                    str(root / args.cli),
                     "analyze",
                     directory,
                     "--data",

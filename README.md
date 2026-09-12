@@ -2,29 +2,31 @@
 
 한국어 의식 보상을 인식하고 아이템별 묶음 시세를 표시하는 Windows 앱입니다. CPU 기반 로컬 영상 인식과 Windows OCR을 사용하며, 컨트롤러와 키보드/마우스 UI의 개발 캡처로 검증합니다.
 
-**현재 버전: 0.3.5 — 개발 프리릴리스.** 제공된 개발 캡처의 회귀 검사는 통과했으나 전체 아이템·HDR·모든 화면 환경의 정확도가 입증된 제품은 아닙니다.
+**현재 버전: 0.4.0 — 개발 프리릴리스.** 제공된 개발 캡처의 회귀 검사는 통과했으나 전체 아이템·HDR·모든 화면 환경의 정확도가 입증된 제품은 아닙니다.
 
 ## 다운로드 및 실행
 
-[GitHub Releases](https://github.com/Dev-Jahn/poe2-ritual-checker/releases)에서 `RitualChecker-0.3.5-win-x64.exe` 하나를 내려받아 쓰기 가능한 폴더에서 실행하세요. DLL 폴더나 별도 .NET 설치는 필요 없습니다.
+[GitHub Releases](https://github.com/Dev-Jahn/poe2-ritual-checker/releases)에서 `RitualChecker-0.4.0-win-x64.exe` 하나를 내려받아 쓰기 가능한 폴더에서 실행하세요. DLL 폴더나 별도 .NET 설치는 필요 없습니다.
 
 - Windows 10 2004 이상 또는 Windows 11, x64.
 - 한국어 툴팁 판독에는 Windows 한국어 OCR 언어 기능이 필요합니다.
 - 리그를 선택한 뒤 의식 창에서 **F8**로 분석합니다. XInput 호환 컨트롤러에서는 **LB+RB를 길게 눌러도** 됩니다.
 - 아이템 위에 커서를 올려 툴팁을 표시하면 옵션과 공물 비용을 읽습니다. 마우스 툴팁 검증은 현재 위쪽에 표시된 커런시 툴팁 1장입니다. 키와 버튼 조합은 입력 설정에서 변경합니다.
 - 저장된 화면은 **화면 파일 열기**로 확인합니다. 미리보기는 의식 창을 확대합니다.
+- 잘못 인식한 화면은 **오인식 저장**으로 남깁니다. EXE 옆 `recognition-reports/`에 원본과 당시 판독 결과를 저장하며 자동 전송하지 않습니다.
 
 실행 파일은 현재 Authenticode 서명되지 않았습니다. 게시된 SHA-256과 빌드 출처 증명을 확인할 수 있으며, 이는 Windows 코드 서명을 대체하지 않습니다.
 
 ```powershell
-Get-FileHash ./RitualChecker-0.3.5-win-x64.exe -Algorithm SHA256
+Get-FileHash ./RitualChecker-0.4.0-win-x64.exe -Algorithm SHA256
 # GitHub CLI가 설치되어 있으면 빌드 출처 확인:
-gh attestation verify ./RitualChecker-0.3.5-win-x64.exe --repo Dev-Jahn/poe2-ritual-checker
+gh attestation verify ./RitualChecker-0.4.0-win-x64.exe --repo Dev-Jahn/poe2-ritual-checker
 ```
 
 ## 기능
 
 - 의식 창과 격자 검출 → 아이템 식별 → 시세 조회 → 입력을 통과시키는 오버레이.
+- 공식 그림에 검토한 실제 아이템 특징을 보완합니다. 여러 칸의 분할 후보를 함께 비교하고, 이동 중인 컨트롤러 테두리를 그림 비교에서 제외합니다. 같은 화면에서 약한 후보가 기존 판독을 뒤집는 경우에는 주변 아이템과 실제 모습의 일치 여부를 확인합니다.
 - 묶음 전체 가격이 1 div 미만이면 ex, 이상이면 div. 환율이 없으면 임의 환산하지 않습니다.
 - 실행 시 선택한 리그의 커런시 14개·고유/서판 9개 분류를 poe.ninja에서 미리 받습니다. 분류당 1회이며 아이템별 요청은 하지 않습니다.
 - 캡처 여부와 관계없이 30분마다 갱신합니다. 재실행해도 디스크 캐시를 재사용하며, 변경되지 않은 응답은 ETag로 확인합니다. 갱신 실패 시 마지막 가격과 환율로 계속 표시하고 `*`만 붙입니다. 조회 시각과 환율은 항목 상세에서 확인합니다.
@@ -44,6 +46,7 @@ gh attestation verify ./RitualChecker-0.3.5-win-x64.exe --repo Dev-Jahn/poe2-rit
 게임 화면은 외부 인식 서버로 전송하지 않습니다. 자동 시세 갱신은 리그·분류만 poe.ninja에 전달합니다. 수동 거래소 조회 때는 아이템·옵션 검색 조건을 거래소에 전달합니다.
 
 - 분석 원본과 진단 자료: EXE 옆 `captures/`에 자동 저장. 별도 오버레이 창은 캡처에서 제외합니다. **화면에 나타난 캐릭터명이나 대화 등이 포함될 수 있으므로 공개 업로드 전에 직접 확인하세요.** 자동 삭제하지 않습니다.
+- 오인식 기록: EXE 옆 `recognition-reports/`. 버튼 신고, 이름 수정, 같은 화면의 이름·크기 판독 충돌을 기록합니다. 자동 충돌 탐지가 모든 오류를 찾지는 못합니다. 신고 결과를 확인 없이 학습 정답으로 사용하지 않습니다.
 - 인식 자료: `%LOCALAPPDATA%/RitualChecker/assets/<자료 해시>/`에 첫 실행 시 자동 전개.
 - 설정: `%LOCALAPPDATA%/RitualChecker/settings.json`.
 - 시세 DB와 서버 대기 기록: `%LOCALAPPDATA%/RitualChecker/`. poe.ninja 가격·환율은 시간 경과만으로 삭제하지 않습니다. 마지막 확인 후 30분이 지나면 `*`를 붙이며, 가격 응답에 포함된 환율을 함께 보관해 표시 단위와 환산에 사용합니다.
@@ -59,10 +62,10 @@ Windows, .NET 8 SDK, Python 3.13을 준비합니다. 공개 저장소에 고정�
 python -m pip install -r tools/requirements.txt
 ./build.ps1
 python -m pytest tests/test_tools.py -q
-./build.ps1 -Publish -Version 0.3.5
+./build.ps1 -Publish -Version 0.4.0
 ```
 
-결과: `artifacts/0.3.5/RitualChecker-0.3.5-win-x64.exe`와 `SHA256SUMS.txt`.
+결과: `artifacts/0.4.0/RitualChecker-0.4.0-win-x64.exe`와 `SHA256SUMS.txt`.
 WPF 호환성을 위해 trimming은 사용하지 않습니다. 게시 단계는 단일 EXE 외 파일이 생기면 실패합니다.
 
 참조 갱신은 `python tools/update_catalog.py --out data`로 수행합니다. 원격 이미지·옵션 변경은 인식 결과에 영향을 주므로 변경 자료는 다시 검증해야 합니다. 게임 이미지와 정보의 권리는 [별도 출처 안내](THIRD_PARTY_NOTICES.md)를 확인하세요.
@@ -70,6 +73,8 @@ WPF 호환성을 위해 trimming은 사용하지 않습니다. 게시 단계는 
 ## 검증과 한계
 
 개발 캡처 46장(서로 다른 이미지 45장)의 회귀 검사를 통과했습니다. 45장에서는 아이템 관측 641건·툴팁 화면 8장을 검사하고, 보류 실패 화면 1장은 창 검출·격자 위치·보류 모드를 검사합니다. 키보드/마우스 자료는 한 사용자의 2560×1440 화면 7장·아이템 관측 115건입니다. 같은 화면의 반복 관측과 개발에 사용한 자료를 포함합니다. 독립 최종 시험이나 99.9999% 정확도 입증이 아닙니다.
+
+0.4.0에서는 실제 캡처 886장 중 거의 같은 격자 관측 245장을 묶어 641개 관측을 구축했습니다. 70장의 확인된 아이템 177종으로 특징 모델을 만들고, 별도 세션의 개발 검증 102장·아이템 관측 1,782건에서 격자·영역·이름·수량 오류 0건을 확인했습니다. 미확인 학습 후보 469장은 정답이나 정확도 계산에 포함하지 않습니다. 자료 구축과 재현 방법은 [인식 자료 안내](docs/RECOGNITION_DATA.md)에 있습니다.
 
 원본 캡처와 정답 목록은 개인정보 때문에 공개하지 않습니다. 따라서 공개 CI의 단위 검사가 전체 캡처 회귀 검사를 재현하지는 않습니다. 평가 형식과 도구는 공개합니다. [검증 범위](docs/VALIDATION.md), [릴리스 절차](docs/RELEASING.md), [공개 전 점검](docs/PUBLICATION_REVIEW.md)을 참고하세요.
 
